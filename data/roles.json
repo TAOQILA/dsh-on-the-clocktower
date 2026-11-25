@@ -1,0 +1,2378 @@
+{
+ "version": "1.0.0",
+ "generated_at": "2026-11-25T23:11:58",
+ "count": 169,
+ "roles": [
+  {
+   "id": "洗衣妇",
+   "name": "洗衣妇",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知两名玩家和一个镇民角色：这两名玩家之一是该角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "洗衣妇.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "图书管理员",
+   "name": "图书管理员",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知两名玩家和一个外来者角色：这两名玩家之一是该角色（或者你会得知没有外来者在场）。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "图书管理员.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "调查员",
+   "name": "调查员",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知两名玩家和一个爪牙角色：这两名玩家之一是该角色（或者你会得知没有爪牙在场）。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "调查员.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "厨师",
+   "name": "厨师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知场上邻座的邪恶玩家有多少对。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "厨师.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "共情者",
+   "name": "共情者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会得知与你邻近的两名存活的玩家中邪恶玩家的数量。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "共情者.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "占卜师",
+   "name": "占卜师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择两名玩家：你会得知他们之中是否有恶魔。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "占卜师.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "送葬者",
+   "name": "送葬者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你会得知今天白天死于处决的玩家的角色。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "送葬者.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "僧侣",
+   "name": "僧侣",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择除你以外的一名玩家：当晚恶魔的负面能力对他无效。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "僧侣.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "守鸦人",
+   "name": "守鸦人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果你在夜晚死亡，你会被唤醒，然后你要选择一名玩家：你会得知他的角色。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "守鸦人.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "贞洁者",
+   "name": "贞洁者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "当你首次被提名时，如果提名你的玩家是镇民，他立刻被处决。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "贞洁者.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "猎手",
+   "name": "猎手",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，你可以在白天时公开选择一名玩家：如果他是恶魔，他死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "猎手.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "士兵",
+   "name": "士兵",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "恶魔的负面能力对你无效。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "士兵.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "镇长",
+   "name": "镇长",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果只有三名玩家存活且白天没有人被处决，你的阵营获胜。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "镇长.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "管家",
+   "name": "管家",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "每个夜晚，你要选择除你以外的一名玩家：明天白天，只有他投票时你才能投票。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "管家.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "酒鬼",
+   "name": "酒鬼",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "你不知道你是酒鬼。你以为你是一个镇民角色，但其实你不是。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "酒鬼.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "陌客",
+   "name": "陌客",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "你可能会被当作邪恶阵营、爪牙角色或恶魔角色，即使你已死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "陌客.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "圣徒",
+   "name": "圣徒",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果你死于处决，你的阵营落败。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "圣徒.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "投毒者",
+   "name": "投毒者",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择一名玩家：他在当晚和明天白天中毒。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "投毒者.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "间谍",
+   "name": "间谍",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你能查看魔典。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "间谍.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "红唇女郎",
+   "name": "红唇女郎",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "如果大于等于五名玩家存活时（旅行者不计算在内）恶魔死亡，你变成那个恶魔。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "红唇女郎.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "男爵",
+   "name": "男爵",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "会有额外的外来者在场。[+2 外来者]",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "男爵.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "小恶魔",
+   "name": "小恶魔",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。如果你以这种方式自杀，一名爪牙会变成小恶魔。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "小恶魔.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "官员",
+   "name": "官员",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个夜晚，你要选择除你以外的一名玩家：明天白天，他的投票算作三票。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "官员.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "乞丐",
+   "name": "乞丐",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "你只能使用投票标记才能投票。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "乞丐.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "枪手",
+   "name": "枪手",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个白天，当首次投票被统计后，你可以选择一名刚投过票的玩家：他死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "枪手.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "窃贼",
+   "name": "窃贼",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个夜晚，你要选择除你以外的一名玩家：明天白天他的投票会被算作负数。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "窃贼.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "替罪羊",
+   "name": "替罪羊",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "如果你的阵营的一名玩家被处决，你可能会代替他被处决。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "替罪羊.md",
+   "scripts": [
+    "暗流涌动"
+   ]
+  },
+  {
+   "id": "祖母",
+   "name": "祖母",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知一名善良玩家和他的角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "祖母.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "水手",
+   "name": "水手",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择一名存活的玩家：你或他之一会醉酒直到下个黄昏。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "水手.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "侍女",
+   "name": "侍女",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择除你以外的两名存活的玩家：你会得知他们中有几人在当晚因其自身能力而被唤醒。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "侍女.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "驱魔人",
+   "name": "驱魔人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择一名玩家（与上个夜晚不同）：如果你选中了恶魔，他会得知你是驱魔人，但他当晚不会因其自身能力而被唤醒。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "驱魔人.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "旅店老板",
+   "name": "旅店老板",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择两名玩家：他们当晚不会死亡，但其中一人会醉酒到下个黄昏。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "旅店老板.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "赌徒",
+   "name": "赌徒",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择一名玩家并猜测该玩家的角色：如果你猜错了，你会死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "赌徒.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "造谣者",
+   "name": "造谣者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个白天，你可以公开发表一个声明。如果该声明正确，在当晚会有一名玩家死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "造谣者.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "侍臣",
+   "name": "侍臣",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择一个角色：如果该角色在场，该角色之一从当晚开始醉酒三天三夜。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "侍臣.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "教授",
+   "name": "教授",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时*，你可以选择一名死亡的玩家：如果他是镇民，你会将他起死回生。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "教授.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "吟游诗人",
+   "name": "吟游诗人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "当一名爪牙死于处决时，除了你和旅行者以外的所有其他玩家醉酒直到明天黄昏。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "吟游诗人.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "茶艺师",
+   "name": "茶艺师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果与你邻近的两名存活的玩家是善良的，他们不会死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "茶艺师.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "和平主义者",
+   "name": "和平主义者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "被处决的善良玩家可能不会死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "和平主义者.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "弄臣",
+   "name": "弄臣",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "当你首次将要死亡时，你不会死亡。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "弄臣.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "修补匠",
+   "name": "修补匠",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "你随时可能死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "修补匠.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "月之子",
+   "name": "月之子",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "当你得知你死亡时，你要公开选择一名存活的玩家。如果他是善良的，在当晚他会死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "月之子.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "莽夫",
+   "name": "莽夫",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "每个夜晚，首个使用其自身能力选择了你的玩家会醉酒直到下个黄昏。你会转变为他的阵营。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "莽夫.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "疯子",
+   "name": "疯子",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "你以为你是一个恶魔，但其实你不是。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "疯子.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "教父",
+   "name": "教父",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "在你的首个夜晚，你会得知有哪些外来者角色在场。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "教父.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "魔鬼代言人",
+   "name": "魔鬼代言人",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择一名存活的玩家（与上个夜晚不同）：如果明天白天他被处决，他不会死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "魔鬼代言人.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "刺客",
+   "name": "刺客",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每局游戏限一次，在夜晚时*，你可以选择一名玩家：他死亡，即使因为任何原因让他不会死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "刺客.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "主谋",
+   "name": "主谋",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "如果恶魔因为死于处决而因此导致游戏结束时，再额外进行一个夜晚和一个白天。在那个白天如果有玩家被处决，他的阵营落败。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "主谋.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "僵怖",
+   "name": "僵怖",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，如果今天白天没有人死亡，你会被唤醒并要选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "僵怖.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "普卡",
+   "name": "普卡",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚，你要选择一名玩家：他中毒。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "普卡.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "沙巴洛斯",
+   "name": "沙巴洛斯",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择两名玩家：他们死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "沙巴洛斯.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "珀",
+   "name": "珀",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你可以选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "珀.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "法官",
+   "name": "法官",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每局游戏限一次，如果其他玩家发起了提名，你可以选择让本次提名直接执行处决或让投票无效。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "法官.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "女舍监",
+   "name": "女舍监",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个白天，你可以选择至多三对玩家交换座位。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "女舍监.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "巫毒师",
+   "name": "巫毒师",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "只有你和死亡的玩家可以投票，且投票不需要使用投票标记。忽略票数需要过半的要求。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "巫毒师.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "学徒",
+   "name": "学徒",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "在你的首个夜晚，如果你是善良的，你会获得一个镇民角色的能力；如果你是邪恶的，你会获得一个爪牙角色的能力。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "学徒.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "主教",
+   "name": "主教",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "只有说书人可以发起提名。每个白天说书人至少要提名一名你对立阵营的玩家。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "主教.md",
+   "scripts": [
+    "黯月初升"
+   ]
+  },
+  {
+   "id": "钟表匠",
+   "name": "钟表匠",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知恶魔与爪牙之间最近的距离。（邻座的玩家距离为1）",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "钟表匠.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "筑梦师",
+   "name": "筑梦师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择除你及旅行者以外的一名玩家：你会得知一个善良角色和一个邪恶角色，该玩家是其中一个角色。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "筑梦师.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "舞蛇人",
+   "name": "舞蛇人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择一名存活的玩家：如果你选中了恶魔，你和他交换角色和阵营，然后他中毒。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "舞蛇人.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "数学家",
+   "name": "数学家",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会得知有多少名玩家的能力因为其他角色的能力而未正常生效。（从上个黎明到你被唤醒时）",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "数学家.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "卖花女孩",
+   "name": "卖花女孩",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你会得知在今天白天时是否有恶魔投过票。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "卖花女孩.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "城镇公告员",
+   "name": "城镇公告员",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你会得知在今天白天时是否有爪牙发起过提名。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "城镇公告员.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "神谕者",
+   "name": "神谕者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你会得知有多少名死亡的玩家是邪恶的。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "神谕者.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "博学者",
+   "name": "博学者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个白天，你可以私下询问说书人以得知两条信息：一个是正确的，一个是错误的。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "博学者.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "女裁缝",
+   "name": "女裁缝",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择除你以外的两名玩家：你会得知他们是否为同一阵营。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "女裁缝.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "哲学家",
+   "name": "哲学家",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择一个善良角色：你获得该角色的能力。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "哲学家.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "艺术家",
+   "name": "艺术家",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在白天时，你可以私下询问说书人一个是非问题，你会得知该问题的答案。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "艺术家.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "杂耍艺人",
+   "name": "杂耍艺人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个白天，你可以公开猜测任意玩家的角色最多五次。在当晚，你会得知猜测正确的角色数量。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "杂耍艺人.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "贤者",
+   "name": "贤者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果恶魔杀死了你，在当晚你会被唤醒并得知两名玩家，其中一名是杀死你的那个恶魔。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "贤者.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "畸形秀演员",
+   "name": "畸形秀演员",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果你“疯狂”地证明自己是外来者，你可能被处决。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "畸形秀演员.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "心上人",
+   "name": "心上人",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "当你死亡时，会有一名玩家开始醉酒。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "心上人.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "理发师",
+   "name": "理发师",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果你死亡，在当晚恶魔可以选择两名玩家（不能选择其他恶魔）交换角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "理发师.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "呆瓜",
+   "name": "呆瓜",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "当你得知你死亡时，你要公开选择一名存活的玩家：如果他是邪恶的，你的阵营落败。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "呆瓜.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "镜像双子",
+   "name": "镜像双子",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "你与一名对立阵营的玩家互相知道对方是什么角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": false,
+   "wiki": "镜像双子.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "女巫",
+   "name": "女巫",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择一名玩家：如果他明天白天发起提名，他死亡。如果只有三名存活的玩家，你失去此能力。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "女巫.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "洗脑师",
+   "name": "洗脑师",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择一名玩家和一个善良角色。他明天白天和夜晚需要“疯狂”地证明自己是这个角色，不然他可能被处决。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "洗脑师.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "麻脸巫婆",
+   "name": "麻脸巫婆",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚*，你要选择一名玩家和一个角色，如果该角色不在场，他变成该角色。如果因此创造了一个恶魔，当晚的死亡由说书人决定。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "麻脸巫婆.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "方古",
+   "name": "方古",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "方古.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "亡骨魔",
+   "name": "亡骨魔",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "亡骨魔.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "诺-达鲺",
+   "name": "诺-达鲺",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "诺-达鲺.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "涡流",
+   "name": "涡流",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "涡流.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "怪咖",
+   "name": "怪咖",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "如果你表现得很有趣，当天你不能被流放。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "怪咖.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "集骨者",
+   "name": "集骨者",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每局游戏限一次，在夜晚时*，你可以选择一名死亡的玩家：他重新获得能力直到下个黄昏。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "集骨者.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "咖啡师",
+   "name": "咖啡师",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个夜晚，直至下个黄昏，由说书人二选一：1）一名玩家解除并免受醉酒和中毒影响，且会得知正确信息；2）一名玩家的能力可以生效两次。该玩家会得知是哪个效果。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "咖啡师.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "流莺",
+   "name": "流莺",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个夜晚*，你要选择一名存活的玩家：如果他同意，你会得知他的角色，但是你们两个可能同时死亡。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "流莺.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "屠夫",
+   "name": "屠夫",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个白天，首次处决后，你可以再次发起提名。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": false,
+   "wiki": "屠夫.md",
+   "scripts": [
+    "梦殒春宵"
+   ]
+  },
+  {
+   "id": "事务官",
+   "name": "事务官",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知一名善良玩家。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "事务官.md",
+   "scripts": []
+  },
+  {
+   "id": "亡魂",
+   "name": "亡魂",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "你可以在夜晚睁眼。当其他邪恶玩家被唤醒时，你也会被唤醒。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "亡魂.md",
+   "scripts": []
+  },
+  {
+   "id": "传教士",
+   "name": "传教士",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择一名玩家：如果你选中了爪牙，他会得知被传教士选中。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "传教士.md",
+   "scripts": []
+  },
+  {
+   "id": "侏儒",
+   "name": "侏儒",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "当你加入游戏时，所有玩家会得知一名与你阵营相同的玩家。每当他被提名时，你可以杀死提名者。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "侏儒.md",
+   "scripts": []
+  },
+  {
+   "id": "修行者",
+   "name": "修行者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知距离最近的邪恶玩家位于你的顺时针还是逆时针方向。如果两侧的邪恶玩家与你距离相等，你得知的信息由说书人决定。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "修行者.md",
+   "scripts": []
+  },
+  {
+   "id": "公主",
+   "name": "公主",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个白天，如果你提名并处决了一名玩家，当晚恶魔不会造成死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "公主.md",
+   "scripts": []
+  },
+  {
+   "id": "军团",
+   "name": "军团",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，可能有一名玩家死亡。如果一项提名只有邪恶玩家投票，投票无效。你也会被当作是爪牙。[多数玩家为军团]",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "军团.md",
+   "scripts": []
+  },
+  {
+   "id": "农夫",
+   "name": "农夫",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "当你在夜晚死亡时，一名存活的善良玩家会变成农夫。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "农夫.md",
+   "scripts": []
+  },
+  {
+   "id": "利维坦",
+   "name": "利维坦",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "如果多于一名善良玩家被处决，邪恶阵营获胜。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "利维坦.md",
+   "scripts": []
+  },
+  {
+   "id": "半兽人",
+   "name": "半兽人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择一名存活玩家：如果他是善良的，他死亡，并且当晚恶魔不会造成死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "半兽人.md",
+   "scripts": []
+  },
+  {
+   "id": "卡扎力",
+   "name": "卡扎力",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。[由你决定谁是什么爪牙，-或+任意数量外来者]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "卡扎力.md",
+   "scripts": []
+  },
+  {
+   "id": "印度教教徒",
+   "name": "印度教教徒",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "最先死亡的四名玩家会立刻以相同阵营的旅行者转世重生。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "印度教教徒.md",
+   "scripts": []
+  },
+  {
+   "id": "召唤师",
+   "name": "召唤师",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "在首个夜晚，你会得知三个伪装。在第三个夜晚，你要选择一名玩家：他变成由你选择的邪恶恶魔。[无恶魔在场]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "召唤师.md",
+   "scripts": []
+  },
+  {
+   "id": "告密者",
+   "name": "告密者",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "爪牙会在其首个夜晚得知三个伪装。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "告密者.md",
+   "scripts": []
+  },
+  {
+   "id": "哈迪寂亚",
+   "name": "哈迪寂亚",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你可以选择三名玩家（所有玩家都会得知你选了谁）：他们分别秘密决定自己的生死，然后如果他们都存活则都死亡。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "哈迪寂亚.md",
+   "scripts": []
+  },
+  {
+   "id": "哥布林",
+   "name": "哥布林",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "如果你在被提名后公开声明自己是哥布林且在那个白天被处决，你的阵营获胜。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "哥布林.md",
+   "scripts": []
+  },
+  {
+   "id": "唱诗男孩",
+   "name": "唱诗男孩",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果恶魔杀死了国王，你会得知哪名玩家是恶魔。[+国王]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "唱诗男孩.md",
+   "scripts": []
+  },
+  {
+   "id": "园丁",
+   "name": "园丁",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "由说书人来为所有玩家派发角色。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "园丁.md",
+   "scripts": []
+  },
+  {
+   "id": "国王",
+   "name": "国王",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，如果死亡的玩家数量大于或等于存活的玩家数量，你会得知一个存活的角色。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "国王.md",
+   "scripts": []
+  },
+  {
+   "id": "堤丰之首",
+   "name": "堤丰之首",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。[邪恶角色全部邻座，你靠近正中，+1爪牙，-或+任意数量外来者]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "堤丰之首.md",
+   "scripts": []
+  },
+  {
+   "id": "失忆者",
+   "name": "失忆者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "你不知道你的能力是什么。每个白天你可以找说书人猜测一次，你会得知你的猜测有多准确。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "失忆者.md",
+   "scripts": []
+  },
+  {
+   "id": "失败的上帝",
+   "name": "失败的上帝",
+   "faction": "legendary",
+   "faction_zh": "传奇角色",
+   "ability": "每局游戏至少一次，说书人将会出现失误，但会纠正并公开承认自己曾处理有误。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "失败的上帝.md",
+   "scripts": []
+  },
+  {
+   "id": "奥赫",
+   "name": "奥赫",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一个角色：他死亡。如果该角色不在场，则由说书人来决定谁会被你杀死。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "奥赫.md",
+   "scripts": []
+  },
+  {
+   "id": "女祭司",
+   "name": "女祭司",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会得知一名说书人认为你最应该与其交流的玩家。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "女祭司.md",
+   "scripts": []
+  },
+  {
+   "id": "守夜人",
+   "name": "守夜人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择一名玩家：他会得知你是守夜人。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "守夜人.md",
+   "scripts": []
+  },
+  {
+   "id": "寡妇",
+   "name": "寡妇",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "在你的首个夜晚，你能查看魔典并选择一名玩家：他中毒。随后，始终会有一名善良玩家知道寡妇在场。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "寡妇.md",
+   "scripts": []
+  },
+  {
+   "id": "将军",
+   "name": "将军",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会得知说书人认为哪个阵营当前更有优势（善良/邪恶/均势）。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "将军.md",
+   "scripts": []
+  },
+  {
+   "id": "小怪宝",
+   "name": "小怪宝",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚，所有爪牙要秘密决定由哪名玩家来照看小怪宝并且“是恶魔”。每个夜晚*，可能会有一名玩家死亡。[+1爪牙]",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "小怪宝.md",
+   "scripts": []
+  },
+  {
+   "id": "小精灵",
+   "name": "小精灵",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知一个在场的镇民角色。如果你“疯狂”地证明你是该角色，当他死亡时你获得该角色的能力。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "小精灵.md",
+   "scripts": []
+  },
+  {
+   "id": "巡山人",
+   "name": "巡山人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择一名存活的玩家：如果你选中了落难少女，她会变成一个不在场的镇民角色。[+落难少女]",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "巡山人.md",
+   "scripts": []
+  },
+  {
+   "id": "工程师",
+   "name": "工程师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在夜晚时，你可以选择让恶魔变成你选择的恶魔角色，或让所有爪牙变成你选择的爪牙角色。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "工程师.md",
+   "scripts": []
+  },
+  {
+   "id": "巫师",
+   "name": "巫师",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每局游戏限一次，你可以向说书人许愿。如果愿望被实现，可能会伴随着代价和线索。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "巫师.md",
+   "scripts": []
+  },
+  {
+   "id": "帽匠",
+   "name": "帽匠",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果你死亡，当晚爪牙和恶魔玩家可以选择变成新的爪牙和恶魔角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "帽匠.md",
+   "scripts": []
+  },
+  {
+   "id": "异教领袖",
+   "name": "异教领袖",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会转变为与你邻近的一名存活的玩家的阵营。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "异教领袖.md",
+   "scripts": []
+  },
+  {
+   "id": "异术士",
+   "name": "异术士",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "一名或多名玩家各自拥有一个目标。当达成目标后，他会获得一条正确信息。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "异术士.md",
+   "scripts": []
+  },
+  {
+   "id": "异端分子",
+   "name": "异端分子",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "对调胜负结果，即使你已死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "异端分子.md",
+   "scripts": []
+  },
+  {
+   "id": "恐惧之灵",
+   "name": "恐惧之灵",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择一名玩家：如果你提名他且他被处决，他的阵营落败。当你首次选择或更换目标时，所有玩家都会得知你选择了新的玩家。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "恐惧之灵.md",
+   "scripts": []
+  },
+  {
+   "id": "戏法师",
+   "name": "戏法师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个白天，你可以公开进行一次谁是爪牙，谁是恶魔的猜测。如果你猜对，善良阵营获胜。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "戏法师.md",
+   "scripts": []
+  },
+  {
+   "id": "报丧女妖",
+   "name": "报丧女妖",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "如果恶魔杀死了你，所有玩家都会得知此事。从现在开始，你每天可以发起两次提名，每次投票时可以投两票。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "报丧女妖.md",
+   "scripts": []
+  },
+  {
+   "id": "提线木偶",
+   "name": "提线木偶",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "你以为你是一个善良角色，但其实你不是。恶魔会知道你是提线木偶。[提线木偶会与恶魔邻座]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "提线木偶.md",
+   "scripts": []
+  },
+  {
+   "id": "摆渡人",
+   "name": "摆渡人",
+   "faction": "legendary",
+   "faction_zh": "传奇角色",
+   "ability": "在游戏的最后一天，所有已死亡玩家会重新获得投票标记。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "摆渡人.md",
+   "scripts": []
+  },
+  {
+   "id": "政客",
+   "name": "政客",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果你是对你的阵营落败负最大责任的人，你转变阵营并获胜，即使你已死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "政客.md",
+   "scripts": []
+  },
+  {
+   "id": "教皇",
+   "name": "教皇",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "会有重复的善良角色在场。他们也可能是恶魔的伪装。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "教皇.md",
+   "scripts": []
+  },
+  {
+   "id": "无神论者",
+   "name": "无神论者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "说书人可以打破游戏规则，如果说书人被处决，善良阵营获胜，即使你已死亡。[无邪恶角色在场]",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "无神论者.md",
+   "scripts": []
+  },
+  {
+   "id": "暴乱",
+   "name": "暴乱",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "在第三个白天，所有爪牙会变成暴乱，当天被提名的玩家会立即死亡且必须再次提名一名存活的玩家。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "暴乱.md",
+   "scripts": []
+  },
+  {
+   "id": "暴风捕手",
+   "name": "暴风捕手",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "游戏开始时，你要宣布一个善良角色。如果该角色在场，他只能死于处决，但所有邪恶玩家会在首个夜晚得知他是哪一名玩家。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "暴风捕手.md",
+   "scripts": []
+  },
+  {
+   "id": "杂技演员",
+   "name": "杂技演员",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚*，你要选择一名玩家：如果当晚他醉酒或中毒，你死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "杂技演员.md",
+   "scripts": []
+  },
+  {
+   "id": "村夫",
+   "name": "村夫",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你要选择一名玩家：你会得知他的阵营。[+0~2村夫，复数村夫中有一人醉酒]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "村夫.md",
+   "scripts": []
+  },
+  {
+   "id": "气球驾驶员",
+   "name": "气球驾驶员",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每个夜晚，你会得知一名与上个夜晚得知的玩家角色类型不同的玩家。[+0~1外来者]",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "气球驾驶员.md",
+   "scripts": []
+  },
+  {
+   "id": "渔夫",
+   "name": "渔夫",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "每局游戏限一次，在白天时，你可以让说书人给你一些能帮助你的阵营获胜的建议。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "渔夫.md",
+   "scripts": []
+  },
+  {
+   "id": "灵言师",
+   "name": "灵言师",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "在你的首个夜晚，你会得知一个关键词。首个说出该关键词的善良玩家会在当晚转变为邪恶阵营。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "灵言师.md",
+   "scripts": []
+  },
+  {
+   "id": "炸弹人",
+   "name": "炸弹人",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "如果你被处决，除三名玩家以外的其他所有玩家均会死亡。倒数十声后，被最多玩家手指指着的玩家死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "炸弹人.md",
+   "scripts": []
+  },
+  {
+   "id": "炼金术士",
+   "name": "炼金术士",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "你拥有一个爪牙角色的能力。当你使用能力时，说书人可能会要求你更换选择。",
+   "first_night": true,
+   "other_nights": true,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "炼金术士.md",
+   "scripts": []
+  },
+  {
+   "id": "牙噶巴卜",
+   "name": "牙噶巴卜",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "在你的首个夜晚，你会得知一段秘密短语。每次你在白天公开说出这段短语，当天便可能会有一名玩家在这之后死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "牙噶巴卜.md",
+   "scripts": []
+  },
+  {
+   "id": "狂热者",
+   "name": "狂热者",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "如果有大于等于五名玩家存活，你必须在所有提名中投票。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "狂热者.md",
+   "scripts": []
+  },
+  {
+   "id": "痢蛭",
+   "name": "痢蛭",
+   "faction": "demon",
+   "faction_zh": "恶魔",
+   "ability": "每个夜晚*，你要选择一名玩家：他死亡。在你的首个夜晚，你要选择一名存活的玩家：他中毒，只有当他处于死亡状态时你才会立即死亡。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "痢蛭.md",
+   "scripts": []
+  },
+  {
+   "id": "瘟疫医生",
+   "name": "瘟疫医生",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "当你死亡时，说书人会获得一个爪牙能力。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "瘟疫医生.md",
+   "scripts": []
+  },
+  {
+   "id": "私货商人",
+   "name": "私货商人",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "这个剧本包含有自制角色或自制规则。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "私货商人.md",
+   "scripts": []
+  },
+  {
+   "id": "科学怪人",
+   "name": "科学怪人",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "恶魔拥有一个不在场的善良角色的能力，即使他醉酒或中毒。你和他都知道他获得了什么能力。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "科学怪人.md",
+   "scripts": []
+  },
+  {
+   "id": "笑匠",
+   "name": "笑匠",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个白天，你要选择一名玩家：一名其他玩家会在当晚改变角色。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "笑匠.md",
+   "scripts": []
+  },
+  {
+   "id": "精神病患者",
+   "name": "精神病患者",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个白天，在提名开始前，你可以公开选择一名玩家：他死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "精神病患者.md",
+   "scripts": []
+  },
+  {
+   "id": "维齐尔",
+   "name": "维齐尔",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "所有玩家都知道你是维齐尔。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "维齐尔.md",
+   "scripts": []
+  },
+  {
+   "id": "罂粟种植者",
+   "name": "罂粟种植者",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "爪牙和恶魔互相不认识。如果你死亡，当晚他们会互相认识。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "罂粟种植者.md",
+   "scripts": []
+  },
+  {
+   "id": "腹语师",
+   "name": "腹语师",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "如果一名玩家在被提名时“疯狂”地证明自己是一个新的角色，他可能不会死于当天的处决。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "腹语师.md",
+   "scripts": []
+  },
+  {
+   "id": "落难少女",
+   "name": "落难少女",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "所有爪牙都知道落难少女在场。每局游戏限一次，任意爪牙可以公开猜测你是落难少女，如果猜对，你的阵营落败。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "落难少女.md",
+   "scripts": []
+  },
+  {
+   "id": "街头风琴手",
+   "name": "街头风琴手",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "所有玩家在投票时闭眼，且票数会秘密统计。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "街头风琴手.md",
+   "scripts": []
+  },
+  {
+   "id": "解谜大师",
+   "name": "解谜大师",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "一名玩家醉酒，即使你已死亡。每局游戏限一次，你可以猜测谁是那个醉酒的玩家，如果猜对了，你会得知谁是恶魔，但如果猜错了，你会得知错误的“谁是恶魔”信息。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "解谜大师.md",
+   "scripts": []
+  },
+  {
+   "id": "讷神",
+   "name": "讷神",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "会有一顶讷帽。当玩家戴着讷帽的时候，只能说单音节词，但投票算作两票。如果违反规则，讷帽会被转移。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "讷神.md",
+   "scripts": []
+  },
+  {
+   "id": "诡诈杰克",
+   "name": "诡诈杰克",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "场上有两位说书人：一人说真话，一人说假话。每局游戏限一次，他们可能会在黄昏互换。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "诡诈杰克.md",
+   "scripts": []
+  },
+  {
+   "id": "贵族",
+   "name": "贵族",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知三名玩家：其中有且只有一名玩家是邪恶的。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "贵族.md",
+   "scripts": []
+  },
+  {
+   "id": "赏金猎人",
+   "name": "赏金猎人",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知一名邪恶玩家。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "赏金猎人.md",
+   "scripts": []
+  },
+  {
+   "id": "遗忘之门",
+   "name": "遗忘之门",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "玩家不知道自己的角色和阵营。当他们死亡时才会得知这些信息。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "遗忘之门.md",
+   "scripts": []
+  },
+  {
+   "id": "限",
+   "name": "限",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "在等同于初始外来者数量的夜晚，所有镇民玩家中毒直到下个黄昏。[外来者数量任意]",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "限.md",
+   "scripts": []
+  },
+  {
+   "id": "隐士",
+   "name": "隐士",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "你拥有所有外来者能力。[-0~1外来者]",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "隐士.md",
+   "scripts": []
+  },
+  {
+   "id": "食人族",
+   "name": "食人族",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "你拥有上个死于处决的玩家的能力。如果该玩家属于邪恶阵营，你中毒直到下个善良玩家死于处决。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "食人族.md",
+   "scripts": []
+  },
+  {
+   "id": "食人魔",
+   "name": "食人魔",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "在你的首个夜晚，你要选择除你以外的一名玩家：你转变为他的阵营，即使你已醉酒或中毒，但你不知道你转变后的阵营。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "食人魔.md",
+   "scripts": []
+  },
+  {
+   "id": "首席律师",
+   "name": "首席律师",
+   "faction": "loric",
+   "faction_zh": "奇遇角色",
+   "ability": "每个被提名者要选择一名玩家：在投票前，只有他可以发言，并且他要“疯狂”地证明被提名者是善良的，否则他可能死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "首席律师.md",
+   "scripts": []
+  },
+  {
+   "id": "骑士",
+   "name": "骑士",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "在你的首个夜晚，你会得知两名非恶魔玩家。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "骑士.md",
+   "scripts": []
+  },
+  {
+   "id": "魔像",
+   "name": "魔像",
+   "faction": "outsider",
+   "faction_zh": "外来者",
+   "ability": "每局游戏你只能发起提名一次。当你发起提名时，如果被你提名的玩家不是恶魔，他死亡。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "魔像.md",
+   "scripts": []
+  },
+  {
+   "id": "魔术师",
+   "name": "魔术师",
+   "faction": "townsfolk",
+   "faction_zh": "镇民",
+   "ability": "恶魔会以为你是爪牙。爪牙会以为你是恶魔。",
+   "first_night": true,
+   "other_nights": false,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "魔术师.md",
+   "scripts": []
+  },
+  {
+   "id": "鹰身女妖",
+   "name": "鹰身女妖",
+   "faction": "minion",
+   "faction_zh": "爪牙",
+   "ability": "每个夜晚，你要选择两名玩家：明天第一名玩家需要“疯狂”地证明第二名玩家是邪恶的，否则他们之中可能会有人死亡。",
+   "first_night": false,
+   "other_nights": true,
+   "on_death": true,
+   "experimental": true,
+   "wiki": "鹰身女妖.md",
+   "scripts": []
+  },
+  {
+   "id": "黑帮",
+   "name": "黑帮",
+   "faction": "traveler",
+   "faction_zh": "旅行者",
+   "ability": "每个白天限一次，你可以杀死与你邻近的两名存活的玩家中的一名，但需要另一边那个存活的玩家同意。",
+   "first_night": false,
+   "other_nights": false,
+   "on_death": false,
+   "experimental": true,
+   "wiki": "黑帮.md",
+   "scripts": []
+  }
+ ]
+}

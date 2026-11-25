@@ -1,0 +1,32 @@
+{
+  "name": "dsh-on-the-clocktower",
+  "version": "0.5.4",
+  "private": true,
+  "description": "DSH on the Clocktower —— 血染钟鱼：在 DSH 里与 Agent 同玩",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "displayName": "DSH on the Clocktower",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TAOQILA/dsh-on-the-clocktower.git"
+  },
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
