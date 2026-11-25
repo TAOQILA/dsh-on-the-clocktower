@@ -19,7 +19,10 @@ function appendJsonl(file, obj){
 function idOf(id, seat){ return path.join(gameDir(id), 'agents', 'seat-'+String(seat).padStart(2,'0')); }
 
 function createGame(cfg){
-  const id = stamp()+'_'+cfg.script+'_'+cfg.seats.length+'人';
+  // 同一分钟内同配置连续开局时自动加序号，避免覆盖上一局
+  const base = stamp()+'_'+cfg.script+'_'+cfg.seats.length+'人';
+  let id = base, n = 2;
+  while (fs.existsSync(gameDir(id))) id = base+'_'+n++;
   const dir = gameDir(id);
   ensureDir(path.join(dir,'state'));
   ensureDir(path.join(dir,'agents'));

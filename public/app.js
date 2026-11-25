@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.5.4';
+var VERSION = '0.5.6';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -8,11 +8,12 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, mySeat:null, storyMode:'player', storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'' };
+var S = { scripts:[], script:null, seats:[], game:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
 
+window.addEventListener('resize', function(){ if (typeof placeMe === 'function') placeMe(); });
 async function init(){
   try { S.models = await api('models'); } catch(e){ S.models = {providers:[],error:String(e&&e.message||e)}; }
   S.scripts = await api('scripts');
@@ -23,7 +24,7 @@ async function init(){
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); }
 function defaultSeats(n){
-  var a=[]; for(var i=0;i<n;i++) a.push({seat:i,name:'玩家'+(i+1),type:i===0?'human':'agent',provider:'',model:''});
+  var a=[]; for(var i=0;i<n;i++) a.push({seat:i,name:'玩家'+(i+1),type:'agent',provider:'',model:''});
   return a;
 }
 function opt(v,label,cur){ return '<option value="'+v+'" '+(cur===v?'selected':'')+'>'+label+'</option>'; }
@@ -76,7 +77,7 @@ function render(){
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   $('#app').innerHTML =
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
-    '<div class="layout"><div class="left"><div class="table" id="table">'+
+    '<div class="layout"><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
     '</div></div><div class="right"><div class="tabs">'+tabsHtml+'</div>'+panel+'</div></div>';
   drawTable(seats,g);
@@ -88,39 +89,77 @@ function drawTable(seats,g){
     var x = cx+rx*Math.cos(a), y = cy+ry*Math.sin(a);
     var el = document.createElement('div');
     var dead = g && !g.alive[i];
-    el.className = 'seat '+(s.type==='human'?'human':'agent')+(dead?' dead':'')+(S.selSeat===i?' selected':'');
+    var mine = g ? (s.type==='human') : (meZone()==='seat' && S.me.seat===i);
+    el.className = 'seat '+(mine?'human':'agent')+(dead?' dead':'')+(S.selSeat===i?' selected':'');
     el.style.left=x+'%'; el.style.top=y+'%';
     var role = g && g.roles[i] ? g.roles[i] : (s.role||'');
     var marks = g && g.markers[i] ? g.markers[i].join(' ') : '';
-    el.innerHTML = '<div class="seatnum">'+(i+1)+'</div><div class="token">'+(s.type==='human'?'我':'AI')+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
+    el.innerHTML = '<div class="seatnum">'+(i+1)+'</div><div class="token">'+(mine?'你':'AI')+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
       '<div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div>';
-    el.onclick = function(){ S.selSeat=i; render(); };
+    el.dataset.zone = 'seat:'+i;
+    el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
     table.appendChild(el);
   });
+  placeMe();
+}
+function meZone(){ return (S.me && S.me.zone) ? S.me.zone : 'spectator'; }
+function stBox(g){
+  var st = (g && g.storyteller) || { type:(meZone()==='story'?'player':'agent'), name:(meZone()==='story'?'我':'说书人Agent') };
+  var isMe = (g ? st.type === 'player' : meZone()==='story');
+  return '<div class="stbox" data-zone="story" onclick="dropMe(\'story\')">'+
+    '<div class="sttoken">'+(isMe?'我':'AI')+'</div>'+
+    '<div class="stname">'+st.name+'</div><div class="strole">说书人</div></div>';
+}
+function specBox(){
+  var on = meZone()==='spectator';
+  return '<div class="specbox'+(on?' on':'')+'" data-zone="spectator" onclick="dropMe(\'spectator\')">'+
+    '<span class="speclabel">旁观席</span><span class="specdesc">'+(on?'你在这里':'空')+'</span></div>';
+}
+function dropMe(zone, seat){
+  if(zone==='seat') S.me = { zone:'seat', seat:seat }; else S.me = { zone:zone, seat:0 };
+  S.holdMe = false; render();
+}
+function placeMe(){
+  var left = document.querySelector('.left'); if(!left) return;
+  var old = document.getElementById('mechip'); if(old && old.parentNode) old.parentNode.removeChild(old);
+  var zone = meZone(), target = null;
+  if(zone==='seat'){ target = document.querySelector('.seat[data-zone="seat:'+S.me.seat+'"]'); }
+  else if(zone==='story'){ target = document.querySelector('.stbox'); }
+  else { target = document.querySelector('.specbox'); }
+  if(!target) return;
+  var lr = left.getBoundingClientRect(), tr = target.getBoundingClientRect();
+  var chip = document.createElement('div');
+  chip.id = 'mechip'; chip.className = 'mechip'; chip.textContent = '你';
+  chip.style.left = (tr.left - lr.left + tr.width/2) + 'px';
+  chip.style.top  = (tr.top - lr.top + tr.height - 10) + 'px';
+  chip.onclick = function(ev){ ev.stopPropagation(); S.holdMe = !S.holdMe; chip.classList.toggle('holding', S.holdMe); };
+  left.appendChild(chip);
+}
+function meZoneLabel(){
+  var z = meZone();
+  if(z==='story') return '说书人';
+  if(z==='seat') return (S.me.seat+1)+' 号座位（玩家）';
+  return '旁观席';
 }
 function setupPanel(){
   var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+s.roles.length+'角色）',S.script.name); }).join('');
   var pills = S.seats.map(function(s,i){
-    return '<span class="pill '+(s.type==='human'?'on':'')+'" onclick="toggleSeat('+i+')">'+(i+1)+' 号 · '+s.name+'('+(s.type==='human'?'我':'Agent')+')</span>';
+    var mine = (meZone()==='seat' && S.me.seat===i);
+    return '<span class="pill '+(mine?'on':'')+'" onclick="dropMe(\'seat\','+i+')">'+(mine?'你 · ':'')+(i+1)+' 号 · '+s.name+'</span>';
   }).join('');
   return '<div class="section"><h3>建局配置</h3>'+
     '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);S.seats=defaultSeats(S.seats.length);render()">'+scripts+'</select></div>'+
     '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px">'+
     '<button onclick="S.seats=defaultSeats(Math.max(5,Math.min(30,+document.getElementById(\'seatCount\').value)));render()">应用人数</button></div>'+
-    '<div class="row">说书人：<select id="storyMode" onchange="S.storyMode=this.value;render()">'+
-    opt('player','玩家（我）',S.storyMode)+opt('agent','Agent',S.storyMode)+'</select></div>'+
-    (S.storyMode==='agent'?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);S.storyProvider=q.provider;S.storyModel=q.model')+'</div>'):'')+
+    '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
+    '<p class="muted">左上方是说书人圆圈、其下是旁观席；点「你」标志可拿起，再点目标位置放下。</p>'+
+    ((meZone()!=='story')?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);S.storyProvider=q.provider;S.storyModel=q.model')+'</div>'):'')+
     '<div class="row"><button id="startBtn" onclick="startGame()" '+(S.starting?'disabled':'')+'>'+(S.starting?'正在创建并进入第一夜...':'创建对局并进入第一夜')+'</button></div>'+
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
-    '<p class="muted">你可选任意座位当玩家；说书人单独选；其余座位每个 Agent 模拟一位玩家。当前视角：'+(S.mySeat==null?'未定':((S.mySeat+1)+' 号'))+'。</p>'+
+    '<p class="muted">默认每个人都是 AI。把「你」放到某个座位，你就成为那位玩家；放到说书人圆圈，你就当说书人；放到旁观席，你就只是看。其余座位都由 Agent 扮演。</p>'+
     '</div><div class="seatlist">'+pills+'</div>';
 }
-function toggleSeat(i){
-  var s=S.seats[i];
-  if (s.type==='human'){ s.type='agent'; if(S.mySeat===i) S.mySeat=null; }
-  else { if(S.mySeat!=null) S.seats[S.mySeat].type='agent'; s.type='human'; S.mySeat=i; }
-  render();
-}
+function toggleSeat(i){ dropMe('seat', i); }
 async function saveSeatModel(seat, provider, model){
   if(!S.game) return;
   try { await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model}); S.game = await api('game',{id:S.game.id}); render(); } catch(e){}
@@ -131,10 +170,14 @@ async function saveStoryModel(provider, model){
 }
 async function startGame(){
   if (S.starting) return;
-  var cfg = { script:S.script.name, seats:S.seats,
-    storyteller:S.storyMode==='agent'
-      ? {type:'agent',name:'说书人Agent',provider:S.storyProvider||'',model:S.storyModel||''}
-      : {type:'player',name:'我'} };
+  var zone = meZone();
+  var seatsNew = S.seats.map(function(s,i){
+    return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
+  });
+  var cfg = { script:S.script.name, seats:seatsNew,
+    storyteller:(zone==='story')
+      ? {type:'player',name:'我'}
+      : {type:'agent',name:'说书人Agent',provider:S.storyProvider||'',model:S.storyModel||''} };
   S.starting = true; S.startError = ''; render();
   try {
     var res = await fetch(API+'quickstart', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
@@ -155,8 +198,8 @@ function seatPanel(seats,sel){
   var speakPart = S.game ?
     ('<div class="row"><button onclick="api(\'say\',{id:S.game.id,seat:'+S.selSeat+',text:document.getElementById(\'say\').value,channel:\'town\'}).then(refresh)">发言</button></div><textarea id="say" placeholder="以该座位发言..."></textarea>') : '';
   return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
-    '<div class="row">类型：<select onchange="seats[S.selSeat].type=this.value;render()">'+
-    opt('agent','Agent 玩家',sel.type)+opt('human','真人玩家',sel.type)+'</select></div>'+
+    '<div class="row">身份：<b>'+((meZone()==='seat'&&S.me.seat===S.selSeat)?'你（真人玩家）':'Agent 玩家')+'</b>'+
+    (S.game?'':' <button onclick="dropMe(\'seat\','+S.selSeat+')">把「你」放到这里</button>')+'</div>'+
     '<div class="row">名字：<input value="'+sel.name+'" onchange="seats[S.selSeat].name=this.value;render()"></div>'+
     '<div class="row">模型：'+modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);seats[S.selSeat].provider=q.provider;seats[S.selSeat].model=q.model;saveSeatModel(S.selSeat,q.provider,q.model)')+'</div>'+
     speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>';
@@ -209,10 +252,15 @@ function pollRound(){
     if(S.round.running) pollRound(); else refresh();
   }, 1200);
 }
+function mySeatInGame(g){
+  if(!g || !g.seats) return 0;
+  for(var i=0;i<g.seats.length;i++){ if(g.seats[i].type==='human') return i; }
+  return 0;
+}
 function chatPanel(g){
   if(!g) return '<p class="muted">请先在「建局」中创建对局。</p>';
   var seats = g.seats||[];
-  var self = (S.mySeat!=null?S.mySeat:0);
+  var self = mySeatInGame(g);
   var chOpts = opt('town','town（全员可见）',S.chatChannel)+opt('private','private（私聊）',S.chatChannel);
   var seatOpts = seats.map(function(s,i){ return '<label style="margin-right:8px"><input type="checkbox" class="chtarget" value="'+i+'" '+(S.chatTo.indexOf(i)>=0?'checked':'')+'>'+(i+1)+' 号 · '+s.name+'</label>'; }).join('');
   var msgs = (S.chatMsgs||[]).map(function(m){
@@ -235,13 +283,13 @@ async function sendChat(){
   if(S.chatChannel==='private'){
     document.querySelectorAll('.chtarget').forEach(function(el){ if(el.checked) to.push(+el.value); });
   }
-  await api('say',{id:S.game.id,seat:(S.mySeat!=null?S.mySeat:0),text:inp.value,channel:S.chatChannel,to:to});
+  await api('say',{id:S.game.id,seat:mySeatInGame(S.game),text:inp.value,channel:S.chatChannel,to:to});
   inp.value='';
   await loadChat(); refresh();
 }
 async function loadChat(){
   if(!S.game || S.tab!=='chat') return;
-  var d = await api('messages',{id:S.game.id,viewer:(S.mySeat!=null?S.mySeat:0),storyteller:S.storyMode==='agent'});
+  var d = await api('messages',{id:S.game.id,viewer:mySeatInGame(S.game),storyteller:!(S.game&&S.game.storyteller&&S.game.storyteller.type==='player')});
   S.chatMsgs = d.messages;
   render();
 }
