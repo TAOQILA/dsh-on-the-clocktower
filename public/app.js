@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.5.7';
+var VERSION = '0.5.8';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -8,7 +8,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'' };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -22,7 +22,7 @@ async function init(){
   S.seats = defaultSeats(7);
   render();
 }
-function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); }
+function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); if(t==='log'&&S.history===null) loadHistory(); }
 function defaultSeats(n){
   var a=[]; for(var i=0;i<n;i++) a.push({seat:i,name:'玩家'+(i+1),type:'agent',provider:'',model:''});
   return a;
@@ -116,6 +116,7 @@ function specBox(){
     '<span class="speclabel">旁观席</span><span class="specdesc">'+(on?'你在这里':'空')+'</span></div>';
 }
 function dropMe(zone, seat){
+  if (S.game) return; // 对局已开始：身份已写入对局，位置锁定，避免误解
   if(zone==='seat') S.me = { zone:'seat', seat:seat }; else S.me = { zone:zone, seat:0 };
   S.holdMe = false; render();
 }
@@ -129,12 +130,13 @@ function placeMe(){
   if(!target) return;
   var lr = left.getBoundingClientRect(), tr = target.getBoundingClientRect();
   var chip = document.createElement('div');
-  chip.id = 'mechip'; chip.className = 'mechip'; chip.textContent = '你';
+  chip.id = 'mechip'; chip.className = 'mechip' + (S.game ? ' locked' : ''); chip.textContent = '你';
   chip.style.left = (tr.left - lr.left + tr.width/2) + 'px';
   chip.style.top  = (tr.top - lr.top + tr.height - 10) + 'px';
   /* 拖动：按住「你」拖到目标位置松手即落位；原地松手视为回弹 */
   var drag = null, moved = false;
   chip.addEventListener('pointerdown', function(ev){
+    if (S.game) return; // 对局已开始，位置锁定
     if (ev.button != null && ev.button !== 0) return;
     ev.preventDefault(); ev.stopPropagation();
     var r0 = left.getBoundingClientRect();
@@ -191,7 +193,9 @@ function setupPanel(){
     '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px">'+
     '<button onclick="S.seats=defaultSeats(Math.max(5,Math.min(30,+document.getElementById(\'seatCount\').value)));render()">应用人数</button></div>'+
     '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
-    '<p class="muted">左上方是说书人圆圈、其下是旁观席；点「你」标志可拿起，再点目标位置放下。</p>'+
+    (S.game
+      ? '<p class="muted">本局已开始，「你」的位置已写入对局、不可再改；要换身份请新建一局。</p>'
+      : '<p class="muted">按住「你」拖到目标位置松手即可（也可点一下拿起、再点目标位置）。</p>')+
     ((meZone()!=='story')?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);S.storyProvider=q.provider;S.storyModel=q.model')+'</div>'):'')+
     '<div class="row"><button id="startBtn" onclick="startGame()" '+(S.starting?'disabled':'')+'>'+(S.starting?'正在创建并进入第一夜...':'创建对局并进入第一夜')+'</button></div>'+
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
@@ -226,6 +230,7 @@ async function startGame(){
       throw new Error(j.error||'开局失败');
     }
     S.game = j.data;
+    syncMeFromGame(S.game);
     S.tab='story';
   } catch(e) {
     S.startError = (e && e.message) ? e.message : String(e);
@@ -296,6 +301,15 @@ function mySeatInGame(g){
   for(var i=0;i<g.seats.length;i++){ if(g.seats[i].type==='human') return i; }
   return 0;
 }
+/* 打开/创建对局后，把「你」的摆放同步成这一局里的真实身份 */
+function syncMeFromGame(g){
+  if(!g) return;
+  if (g.storyteller && g.storyteller.type === 'player'){ S.me = { zone:'story', seat:0 }; return; }
+  for (var i=0;i<(g.seats||[]).length;i++){
+    if (g.seats[i].type === 'human'){ S.me = { zone:'seat', seat:i }; return; }
+  }
+  S.me = { zone:'spectator', seat:0 };
+}
 function chatPanel(g){
   if(!g) return '<p class="muted">请先在「建局」中创建对局。</p>';
   var seats = g.seats||[];
@@ -333,11 +347,39 @@ async function loadChat(){
   render();
 }
 function logPanel(g){
-  if(!g) return '<p class="muted">未开局</p>';
-  var lines = g.log.map(function(l){ return '<div><b>'+l.who+'</b> '+l.text+'</div>'; }).join('');
-  return '<div class="section"><h3>对局日志</h3><div class="log">'+lines+'</div></div>'+
-    '<p class="muted">每个 Agent 的完整日志位于 data/games/'+g.id+'/agents/</p>';
+  var head = g ? ('<div class="section"><h3>对局日志</h3><div class="log">'+g.log.map(function(l){ return '<div><b>'+l.who+'</b> '+l.text+'</div>'; }).join('')+'</div></div>'+
+    '<p class="muted">每个 Agent 的完整日志位于 data/games/'+g.id+'/agents/</p>') : '<p class="muted">当前没有打开的对局</p>';
+  return head + historyPanel();
 }
+/* 历史对局：列出 data/games 下的全部对局，点开即恢复观看 */
+function historyPanel(){
+  var list = S.history || null;
+  var body;
+  if (list === null) body = '<div class="muted">点「刷新历史」读取列表</div>';
+  else if (!list.length) body = '<div class="muted">还没有历史对局</div>';
+  else body = list.map(function(id){
+    var cur = (S.game && S.game.id === id);
+    return '<div class="histitem'+(cur?' on':'')+'" onclick="openGame(\''+id+'\')">'+(cur?'▶ ':'')+id+'</div>';
+  }).join('');
+  return '<div class="section"><h3>历史对局</h3>'+
+    '<div class="row"><button onclick="loadHistory()">刷新历史</button>'+
+    (S.game?'<button onclick="closeGame()">关闭当前对局</button>':'')+'</div>'+
+    '<div class="histlist">'+body+'</div></div>';
+}
+async function loadHistory(){
+  try { S.history = await api('games'); } catch(e){ S.history = []; }
+  render();
+}
+async function openGame(id){
+  try {
+    var g = await api('game',{id:id});
+    if(!g) throw new Error('没有这一局');
+    S.game = g; S.selSeat = 0; S.tab = 'grimoire'; S.round = null;
+    syncMeFromGame(g);
+    render();
+  } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }
+}
+function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; render(); }
 function wikiPanel(){ return '<div class="section"><h3>知识库</h3><div id="wikiView" class="wikiview">加载中...</div></div>'; }
 async function loadWiki(){
   if(S.tab!=='wiki') return;
