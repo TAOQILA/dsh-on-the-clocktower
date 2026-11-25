@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.5.6';
+var VERSION = '0.5.7';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -132,7 +132,46 @@ function placeMe(){
   chip.id = 'mechip'; chip.className = 'mechip'; chip.textContent = '你';
   chip.style.left = (tr.left - lr.left + tr.width/2) + 'px';
   chip.style.top  = (tr.top - lr.top + tr.height - 10) + 'px';
-  chip.onclick = function(ev){ ev.stopPropagation(); S.holdMe = !S.holdMe; chip.classList.toggle('holding', S.holdMe); };
+  /* 拖动：按住「你」拖到目标位置松手即落位；原地松手视为回弹 */
+  var drag = null, moved = false;
+  chip.addEventListener('pointerdown', function(ev){
+    if (ev.button != null && ev.button !== 0) return;
+    ev.preventDefault(); ev.stopPropagation();
+    var r0 = left.getBoundingClientRect();
+    drag = {
+      dx: ev.clientX - (r0.left + (parseFloat(chip.style.left) || 0)),
+      dy: ev.clientY - (r0.top + (parseFloat(chip.style.top) || 0))
+    };
+    moved = false;
+    chip.classList.add('dragging');
+    try { chip.setPointerCapture(ev.pointerId); } catch (e) { /* 老浏览器忽略 */ }
+  });
+  chip.addEventListener('pointermove', function(ev){
+    if (!drag) return;
+    ev.preventDefault();
+    var r1 = left.getBoundingClientRect();
+    chip.style.left = (ev.clientX - r1.left - drag.dx) + 'px';
+    chip.style.top  = (ev.clientY - r1.top  - drag.dy) + 'px';
+    moved = true;
+  });
+  chip.addEventListener('pointerup', function(ev){
+    if (!drag) return;
+    drag = null; chip.classList.remove('dragging');
+    try { chip.releasePointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    if (!moved) { S.holdMe = !S.holdMe; chip.classList.toggle('holding', S.holdMe); return; }
+    chip.style.pointerEvents = 'none';
+    var hit = document.elementFromPoint(ev.clientX, ev.clientY);
+    chip.style.pointerEvents = '';
+    var zoneEl = null, p = hit;
+    while (p && p !== document.body) {
+      if (p.dataset && p.dataset.zone) { zoneEl = p; break; }
+      p = p.parentNode;
+    }
+    if (!zoneEl) { placeMe(); return; }
+    var z = String(zoneEl.dataset.zone);
+    if (z.indexOf('seat:') === 0) dropMe('seat', +z.slice(5)); else dropMe(z);
+  });
+  chip.addEventListener('pointercancel', function(){ drag = null; chip.classList.remove('dragging'); placeMe(); });
   left.appendChild(chip);
 }
 function meZoneLabel(){
