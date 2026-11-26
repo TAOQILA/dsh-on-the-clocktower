@@ -526,6 +526,38 @@ async function applyOne(id, seat, out, opts, run){
   });
 }
 
+/* 一次完整的「思考 -> 说话」。关键点：模型思考的这段时间里如果又有人插话，
+   出来的回答就已经过时了 —— 所以比对消息数，发现有新消息就带上新消息重新思考一次。
+   （只补一次，避免无限续杯；第二次之后即便又有人说话也照常落地。） */
+async function thinkAndSpeak(id, seat, opts) {
+  const msgCount = function () {
+    const st = E.loadState(id);
+    return Array.isArray(st.messages) ? st.messages.length : 0;
+  };
+  const route = routeFor(id, seat);
+  const system = playerSystem(id, seat);
+  const n0 = msgCount();
+  let built = buildPrompt(id, seat, opts.replyTo, opts.mode);
+  let out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: system, provider: route.provider, model: route.model });
+  if (out && out.error) return out;
+  const n1 = msgCount();
+  if (n1 > n0) {
+    /* 有人在他思考期间插了话：重建提示词（新消息已在对话里），再想一次 */
+    const built2 = buildPrompt(id, seat, opts.replyTo, opts.mode);
+    const extra = built2.prompt + '\n\n【重要】你刚才思考期间，场上又出现了 ' + (n1 - n0) + ' 条新消息（见上方对话中最新几条）。'
+      + '你之前的想法可能已经不成立了，请结合这些新消息重新判断，再给出你这一轮的回答。';
+    let out2;
+    try {
+      out2 = await callModel({ game: id, seat: seat, prompt: extra, system: system, provider: route.provider, model: route.model });
+    } catch (e) { return out; }
+    if (out2 && !out2.error && out2.text) {
+      E.think(id, seat, '（思考期间场上又有 ' + (n1 - n0) + ' 条新消息，已结合新消息重新判断）');
+      return out2;
+    }
+  }
+  return out;
+}
+
 async function runRound(id, opts) {
   opts = opts || {};
   const cur = RUNNING.get(id);
@@ -559,9 +591,7 @@ async function runRound(id, opts) {
         run.current = seat;
         let out;
         try {
-          const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
-          const route = routeFor(id, seat);
-          out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
+          out = await thinkAndSpeak(id, seat, opts);
         } catch (err) {
           out = { error: String((err && err.message) || err) };
         }
@@ -598,12 +628,32 @@ async function runStoryteller(id, opts) {
   (async function () {
     try {
       const route = routeFor(id, 'storyteller');
-      const out = await callModel({
+      /* 说书人思考期间如果有人在广场上插话，也要把这些话纳入判断 */
+      const msgN = function () {
+        const st = E.loadState(id);
+        return Array.isArray(st.messages) ? st.messages.length : 0;
+      };
+      const m0 = msgN();
+      let out = await callModel({
         game: id, seat: 'storyteller', prompt: built.prompt,
         provider: route.provider, model: route.model,
         system: storytellerSystem(id)
       });
       if (out.error) throw new Error(out.error);
+      const m1 = msgN();
+      if (m1 > m0) {
+        const rebuilt = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
+        try {
+          const out2 = await callModel({
+            game: id, seat: 'storyteller',
+            prompt: rebuilt.prompt + '\n\n【重要】你刚才思考期间，广场上又出现了 ' + (m1 - m0) + ' 条新消息（见上方对话）。'
+              + '请把玩家这些新的发言纳入你的判断，再给出这一阶段的裁定。',
+            provider: route.provider, model: route.model,
+            system: storytellerSystem(id)
+          });
+          if (out2 && !out2.error && out2.text) out = out2;
+        } catch (e) { /* 重想失败就沿用第一次的结果 */ }
+      }
       const parsed = parseReply(out.text);
 
       /* 说书人回包里的座位号从 1 开始，统一在这里折成内部 0 起下标 */
