@@ -165,12 +165,13 @@ function messages(id, viewer, isStoryteller){
 }
 
 /* 每个座位 / 说书人都可以单独指定模型：{provider, model} */
-function setSeatModel(id, seat, provider, model){
+function setSeatModel(id, seat, provider, model, name){
   const s = loadState(id);
   const target = (seat === 'storyteller' || seat === 'story') ? s.storyteller : s.seats[seat];
   if (!target) return {ok:false, error:'没有这个座位'};
   target.provider = provider || '';
   target.model = model || '';
+  if (typeof name === 'string' && name.trim()) target.name = name.trim();
   saveState(id, s);
   const who = (seat === 'storyteller' || seat === 'story') ? '说书人' : s.seats[seat].name;
   log(id, '系统', who + ' 的模型已设为 ' + (target.provider&&target.model ? (target.provider+'/'+target.model) : '默认') );

@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.5.9';
+var VERSION = '0.6.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -24,7 +24,17 @@ async function init(){
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); if(t==='log'&&S.history===null) loadHistory(); }
 function defaultSeats(n){
-  var a=[]; for(var i=0;i<n;i++) a.push({seat:i,name:'玩家'+(i+1),type:'agent',provider:'',model:''});
+  var pairs = modelPairs(), a = [], used = {};
+  for (var i=0;i<n;i++){
+    var p = pairs.length ? pairs[i % pairs.length] : null;
+    var provider = p ? p.provider : '', model = p ? p.model : '';
+    var base = p ? prettyModelName(provider, model) : ('玩家'+(i+1));
+    if (!base) base = '玩家'+(i+1);
+    var nm = base, k = 2;
+    while (used[nm]) { nm = base+' '+(k++); }
+    used[nm] = 1;
+    a.push({seat:i, name:nm, type:'agent', provider:provider, model:model});
+  }
   return a;
 }
 function opt(v,label,cur){ return '<option value="'+v+'" '+(cur===v?'selected':'')+'>'+label+'</option>'; }
@@ -32,11 +42,27 @@ function opt(v,label,cur){ return '<option value="'+v+'" '+(cur===v?'selected':'
 function modelPairs(){
   var out = [], cat = S.models || {providers:[]};
   (cat.providers||[]).forEach(function(p){
-    (p.models||[]).forEach(function(m){ out.push({provider:p.id, model:m.id, label:p.id+' / '+(m.name||m.id), key:p.id+'/'+m.id}); });
+    (p.models||[]).forEach(function(m){ out.push({provider:p.id, model:m.id, name:m.name||'', label:p.id+' / '+(m.name||m.id), key:p.id+'/'+m.id}); });
   });
   return out;
 }
 function modelKeyOf(p, m){ return (p&&m)?(p+'/'+m):''; }
+function cap1(s){ s = String(s||''); return s ? (s.charAt(0).toUpperCase()+s.slice(1)) : s; }
+/* 模型正式名称：优先用目录里的内置名；没有就取 id 的末段、再取第一个“-”前的词，首字母大写 */
+function prettyModelName(provider, model){
+  var pairs = modelPairs();
+  for (var i=0;i<pairs.length;i++){
+    if (pairs[i].provider===provider && pairs[i].model===model){
+      var nm = pairs[i].name;
+      if (nm && nm !== pairs[i].model) return cap1(nm);
+      break;
+    }
+  }
+  var id = String(model||'');
+  var tail = id.indexOf('/')>=0 ? id.split('/').pop() : id;
+  var head = tail.split('-')[0].split('_')[0];
+  return cap1(head || tail || id);
+}
 function modelSelect(id, provider, model, onchangeJs){
   var pairs = modelPairs(), cur = modelKeyOf(provider, model);
   var html = '<select id="'+id+'" '+(onchangeJs?('onchange="'+onchangeJs+'"'):'')+'>';
@@ -203,12 +229,39 @@ function setupPanel(){
     '</div><div class="seatlist">'+pills+'</div>';
 }
 function toggleSeat(i){ dropMe('seat', i); }
+/* 改名：未开局只改内存；已开局连名字一起写回对局 */
+async function renameSeat(seat, name){
+  name = String(name||'').trim();
+  var arr = S.game ? S.game.seats : S.seats;
+  if (arr && arr[seat]) arr[seat].name = name;
+  if (!S.game) { render(); return; }
+  try {
+    var cur = S.game.seats[seat] || {};
+    await api('seatModel',{id:S.game.id,seat:seat,provider:cur.provider||'',model:cur.model||'',name:name});
+    S.game = await api('game',{id:S.game.id});
+  } catch(e){}
+  render();
+}
 async function saveSeatModel(seat, provider, model){
   var arr = S.game ? S.game.seats : S.seats;
-  if (arr && arr[seat]) { arr[seat].provider = provider || ''; arr[seat].model = model || ''; }
+  if (arr && arr[seat]) {
+    var old = arr[seat];
+    var autoOld = autoNameOf(old.provider, old.model);
+    var isAuto = !old.name || old.name === autoOld || /^玩家\d+$/.test(old.name);
+    old.provider = provider || '';
+    old.model = model || '';
+    if (isAuto) old.name = autoNameOf(old.provider, old.model);
+  }
   if (!S.game) { render(); return; }
-  if(!S.game) return;
-  try { await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model}); S.game = await api('game',{id:S.game.id}); render(); } catch(e){}
+  try {
+    var nm = arr && arr[seat] ? arr[seat].name : '';
+    await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model,name:nm});
+    S.game = await api('game',{id:S.game.id}); render();
+  } catch(e){}
+}
+function autoNameOf(provider, model){
+  if (!provider && !model) return '';
+  return prettyModelName(provider, model);
 }
 async function saveStoryModel(provider, model){
   S.storyProvider = provider || ''; S.storyModel = model || '';
@@ -252,7 +305,7 @@ function seatPanel(seats,sel){
   return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
     '<div class="row">身份：<b>'+((meZone()==='seat'&&S.me.seat===S.selSeat)?'你（真人玩家）':'Agent 玩家')+'</b>'+
     (S.game?'':' <button onclick="dropMe(\'seat\','+S.selSeat+')">把「你」放到这里</button>')+'</div>'+
-    '<div class="row">名字：<input value="'+sel.name+'" onchange="seats[S.selSeat].name=this.value;render()"></div>'+
+    '<div class="row">名字：<input value="'+sel.name+'" onchange="renameSeat(S.selSeat,this.value)"></div>'+
     '<div class="row">模型：'+(sel.type==='human'?'<b>你</b>（无需模型）':modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)'))+'</div>'+
     speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>';
 }
@@ -265,7 +318,7 @@ function storyPanel(seats,sel,roles,phase){
     '<button onclick="api(\'role\',{id:S.game.id,seat:'+S.selSeat+',role:document.getElementById(\'roleSel\').value}).then(refresh)">分配</button></div>'+
     '<div class="row">下发私有信息：<input id="infoText" placeholder="例如：你是小恶魔，爪牙是 3 号"><button onclick="api(\'info\',{id:S.game.id,seat:'+S.selSeat+',text:document.getElementById(\'infoText\').value}).then(refresh)">发送</button></div>'+
     '<div class="row">阶段：<select onchange="api(\'phase\',{id:S.game.id,phase:this.value}).then(refresh)">'+phaseOpts+'</select></div></div>'+
-    modelPanel(),
+    modelPanel()+
     '<div class="section"><h3>操作</h3>'+
     '<div class="row">标记：<select id="markSel"><option>中毒</option><option>醉酒</option><option>被保护</option><option>死亡</option></select>'+
     '<button onclick="api(\'marker\',{id:S.game.id,seat:'+S.selSeat+',marker:document.getElementById(\'markSel\').value}).then(refresh)">切换</button></div>'+

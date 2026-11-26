@@ -62,7 +62,7 @@ function buildApi(opts){
   vote: (b) => E.vote(b.id,b.seat,b.target),
   execute: (b) => E.execute(b.id,b.seat),
   marker: (b) => E.toggleMarker(b.id,b.seat,b.marker),
-  seatModel: (b) => E.setSeatModel(b.id, b.seat, b.provider, b.model),
+  seatModel: (b) => E.setSeatModel(b.id, b.seat, b.provider, b.model, b.name),
   /* 可用的模型目录：由宿主端注入（读 DSH 的 provider/model 清单） */
   models: async () => {
     if (typeof opts.listModels === 'function') {
