@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.6';
+var VERSION = '0.6.7';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -227,6 +227,13 @@ function meZoneLabel(){
   return '旁观席';
 }
 function setupPanel(){
+  if (S.game) {
+    return '<div class="section"><h3>建局配置</h3>'+
+      '<p class="muted">本局正在进行中（'+S.game.id+'），一局未结束前不能再建新局。</p>'+
+      '<div class="row"><button onclick="setTab(\'grimoire\')">回到魔典</button>'+
+      '<button onclick="leaveGame()">离开本局，回到建局</button></div>'+
+      '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>';
+  }
   var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+s.roles.length+'角色）',S.script.name); }).join('');
   var pills = S.seats.map(function(s,i){
     var mine = (meZone()==='seat' && S.me.seat===i);
@@ -439,21 +446,23 @@ function modelPanel(){
 /* 轮次驱动器：一次唤醒全场存活 Agent，按座位顺序串行发言 */
 function roundSection(){
   if(!S.game) return '';
-  if(!iAmStoryteller(S.game)) return '';
+  if(!canControl()) return '';
   var st = S.round || {running:false,done:0,total:0,current:null,results:[]};
   var prog = st.total ? ('<div class="muted">进度 '+st.done+'/'+st.total+(st.current!=null?('，正在 '+(st.current+1)+' 号'):'')+'</div>') : '';
   var last = (st.results||[]).map(function(r){
     return '<div><b>'+(r.seat+1)+' 号</b>：'+r.say+(r.whispers?('（私聊 '+r.whispers+' 条）'):'')+'</div>';
   }).join('');
-  return '<div class="section"><h3>Agent 轮次驱动</h3>'+
-    '<p class="muted">按座位顺序依次唤醒存活 Agent，前一位说完后一位才看到（顺序即信息）。未配置 AGENT_ENDPOINT 时为占位发言。</p>'+
-    '<div class="row"><button onclick="runRound()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中...':'开始一轮发言')+'</button></div>'+
+  return '<div class="section"><h3>让 AI 玩家发言</h3>'+
+    '<p class="muted">按座位顺序依次唤醒存活 Agent，前一位说完后一位才看到（顺序即信息）。</p>'+
+    '<div class="row"><button onclick="runRound()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中...':'让所有 AI 玩家发言')+'</button>'+
+    '<button onclick="runRound(3)" '+(st.running?'disabled':'')+'>只让 3 位发言</button></div>'+
     prog+
     '<div class="log" style="max-height:220px">'+(last||'<div class="muted">本轮尚无发言</div>')+'</div></div>';
 }
-async function runRound(){
+async function runRound(limit){
   if(!S.game) return;
-  await api('round',{id:S.game.id});
+  try { await api('round',{id:S.game.id, limit:limit||0}); }
+  catch(e){ S.startError='启动发言失败：'+((e&&e.message)||e); render(); return; }
   S.round = await api('roundStatus',{id:S.game.id});
   render();
   pollRound();
@@ -514,6 +523,7 @@ function chatPanel(g){
     (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
     '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
     '<div id="chatLog" class="log" style="max-height:360px">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
+    roundSection()+
     '</div>';
 }
 async function sendChat(){
@@ -522,9 +532,17 @@ async function sendChat(){
   if(S.chatChannel==='private'){
     document.querySelectorAll('.chtarget').forEach(function(el){ if(el.checked) to.push(+el.value); });
   }
-  await api('say',{id:S.game.id,seat:mySeatInGame(S.game),text:inp.value,channel:S.chatChannel,to:to});
+  var ch = S.chatChannel;
+  await api('say',{id:S.game.id,seat:mySeatInGame(S.game),text:inp.value,channel:ch,to:to});
   inp.value='';
-  await loadChat(); refresh();
+  await loadChat();
+  if (ch === 'town') runRound(3);
+  else refresh();
+}
+/* 离开当前对局（不删文件） */
+function leaveGame(){
+  S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.history=null;
+  setTab('setup');
 }
 async function loadChat(){
   if(!S.game || S.tab!=='chat') return;
@@ -566,38 +584,76 @@ async function openGame(id){
   } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }
 }
 function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; render(); }
-function wikiPanel(){ return '<div class="section"><h3>知识库</h3><div id="wikiView" class="wikiview">加载中...</div></div>'; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtWiki(raw){
+  var t = String(raw||'');
+  t = t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  t = t.replace(/^[<]*\s*返回\s*\[\[[^\]]*\]\]\s*$/gm, '');
+  t = esc(t);
+  t = t.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1');
+  t = t.replace(/'''([^']+)'''/g, '<b>$1</b>');
+  var out = '';
+  t.split(/\r?\n\s*\r?\n/).forEach(function(block){
+    var b = block.trim();
+    if(!b) return;
+    var m = b.match(/^==\s*([^=]+?)\s*==$/);
+    if(m){ out += '<h4>'+m[1]+'</h4>'; return; }
+    out += '<p>'+b.replace(/\r?\n/g,'<br>')+'</p>';
+  });
+  return out || '<p class="muted">（这个条目没有正文）</p>';
+}
+function wikiPanel(){
+  var inner;
+  if(S.wikiPage){
+    var body = (S.wikiText===null) ? '<p class="muted">加载中...</p>' : fmtWiki(S.wikiText);
+    inner = '<div class="wikihead"><button class="wikiback" onclick="wikiBack()">← 返回分类</button><b>'+esc(S.wikiPage)+'</b></div><div class="wikibody">'+body+'</div>';
+  } else {
+    inner = '加载中...';
+  }
+  return '<div class="section"><h3>知识库</h3><div id="wikiView" class="wikiview">'+inner+'</div></div>';
+}
+async function showWikiPage(name){
+  S.wikiPage = name; S.wikiText = null; render();
+  try {
+    var t = await api('wiki',{name:name});
+    if(S.wikiPage!==name) return;
+    S.wikiText = (t==null) ? '（知识库里没有这个条目）' : t;
+  } catch(e){ S.wikiText = '（读取失败：'+String(e&&e.message||e)+'）'; }
+  render();
+}
+function openWikiIdx(i){ var n = S.wikiNames[i]; if(n) showWikiPage(n); }
+function wikiBack(){ S.wikiPage = null; S.wikiText = null; render(); loadWiki(); }
 async function loadWiki(){
   if(S.tab!=='wiki') return;
+  if(S.wikiPage) return;
   var v = $('#wikiView'); if(!v) return;
-  if(v.dataset.loaded) return;
   v.textContent = '加载中...';
   try {
-    var d = await api('wikiList');
-    if(S.tab!=='wiki') return;
+    if(!S.wikiCache) S.wikiCache = await api('wikiList');
+    if(S.tab!=='wiki' || S.wikiPage) return;
+    var d = S.wikiCache;
     var list = Array.isArray(d) ? d : ((d && d.data) || []);
-    var WIKI_ORDER = ['规则','剧本','角色'];
-    var groups = { '规则': [], '剧本': [], '角色': [] };
+    var WIKI_ORDER = ['角色能力类别','规则','剧本','角色'];
+    var groups = { '角色能力类别': [], '规则': [], '剧本': [], '角色': [] };
+    S.wikiNames = [];
     list.forEach(function(it){
       var c = it.category || '';
       (groups[c] || (groups[c] = [])).push(it.name);
     });
+    WIKI_ORDER.forEach(function(k){ (groups[k]||[]).forEach(function(n){ S.wikiNames.push(n); }); });
+    Object.keys(groups).forEach(function(k){ if(WIKI_ORDER.indexOf(k)<0) groups[k].forEach(function(n){ S.wikiNames.push(n); }); });
+    var idx = {};
+    S.wikiNames.forEach(function(n,i){ idx[n]=i; });
     var html = '';
-    WIKI_ORDER.forEach(function(k){
-      var arr = groups[k] || [];
+    var sec = function(k, arr){
       if(!arr.length) return;
       html += '<div class="wikigrp"><h4>'+k+'（'+arr.length+'）</h4><div class="wikitags">';
-      arr.forEach(function(n){ html += '<span class="wikitag">'+n+'</span>'; });
+      arr.forEach(function(n){ html += '<span class="wikitag" onclick="openWikiIdx('+idx[n]+')">'+esc(n)+'</span>'; });
       html += '</div></div>';
-    });
-    var others = Object.keys(groups).filter(function(k){ return WIKI_ORDER.indexOf(k) < 0 && groups[k].length; });
-    others.forEach(function(k){
-      html += '<div class="wikigrp"><h4>'+k+'（'+groups[k].length+'）</h4><div class="wikitags">';
-      groups[k].forEach(function(n){ html += '<span class="wikitag">'+n+'</span>'; });
-      html += '</div></div>';
-    });
+    };
+    WIKI_ORDER.forEach(function(k){ sec(k, groups[k]||[]); });
+    Object.keys(groups).forEach(function(k){ if(WIKI_ORDER.indexOf(k)<0) sec(k, groups[k]||[]); });
     v.innerHTML = html || '<p class="muted">知识库为空</p>';
-    v.dataset.loaded = '1';
   } catch(e) {
     if(S.tab!=='wiki') return;
     v.textContent = '知识库加载失败：'+String(e&&e.message||e);

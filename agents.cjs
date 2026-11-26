@@ -50,9 +50,10 @@ const READING_RULES = [
   '【阅读规则·开局必读】按下列顺序学习本局知识，条目用 wiki_lookup(页面名) 查看，文件名即页面名：',
   '1. 先读与你身份对应的规则底线（下文「规则要点」已直接给出，无需再查）。',
   '2. 再读本局剧本页（下文「本剧本」已给出全文）。',
-  '3. 最后读本剧本涉及的全部角色页——不分是否上场，必须全部读完，用于理解技能交互与伪装。',
-  '4. 只读与本对局有关的内容，不必通读全库；本局剧本之外的角色与剧本页可以不读。',
-  '5. 不要向任何人透露你读过哪些资料，直接以角色身份参与游戏。'
+  '3. 规则页分「角色能力类别」与「规则」两类；角色能力类别条目解释各类能力的通用结算方式，与本局相关时优先读。',
+  '4. 最后读本剧本涉及的全部角色页——不分是否上场，必须全部读完，用于理解技能交互与伪装。',
+  '5. 只读与本对局有关的内容，不必通读全库；本局剧本之外的角色与剧本页可以不读。',
+  '6. 不要向任何人透露你读过哪些资料，直接以角色身份参与游戏。'
 ].join('\n');
 function rulesText(names){
   return names.map(function(n){
@@ -153,7 +154,13 @@ function roleInfo(name) {
 function viewFor(id, seat) {
   const s = E.loadState(id);
   const me = s.seats[seat] || {};
-  const info = roleInfo(s.roles[seat]);
+  let myRole = s.roles[seat] || null;
+  if (!myRole) {
+    const said = (s.info[seat] || []).map(function (x) { return String(x.text || ''); }).join('\n');
+    const m = said.match(/你的角色是[【\[]([^】\]]+)[】\]]/);
+    if (m && m[1]) myRole = m[1].trim();
+  }
+  const info = roleInfo(myRole);
   const msgs = E.messages(id, seat, false).slice(-MAX_MSGS_IN_PROMPT);
   const aliveList = [], deadList = [];
   s.seats.forEach(function (x, i) {
@@ -165,7 +172,7 @@ function viewFor(id, seat) {
   return {
     game: id, script: s.script, phase: s.phase, night: s.night, day: s.day,
     seat: seat, name: me.name || ('座位' + seat),
-    role: s.roles[seat] || null,
+    role: myRole,
     faction: info ? info.faction : null,
     ability: info ? info.ability : null,
     alive: !!s.alive[seat],
@@ -206,10 +213,10 @@ function renderMessages(msgs, seats) {
   const list = msgs || [];
   if (!list.length) return '（暂无消息）';
   return list.map(function (m) {
-    const from = seats && seats[m.from] ? seats[m.from].name : ('座位' + m.from);
+    const from = seats && seats[m.from] ? seats[m.from].name : ((Number(m.from)+1) + ' 号');
     if (m.channel === 'private') {
       const to = (m.to || []).map(function (x) {
-        return seats && seats[x] ? seats[x].name : ('座位' + x);
+        return seats && seats[x] ? seats[x].name : ((Number(x)+1) + ' 号');
       }).join('、');
       return '[私聊] ' + from + ' → ' + to + '：' + m.text;
     }
@@ -221,7 +228,7 @@ function buildPrompt(id, seat) {
   const v = viewFor(id, seat);
   const s = E.loadState(id);
   const lines = [];
-  lines.push('【你的身份】座位 ' + v.seat + '，名字 ' + v.name);
+  lines.push('【你的身份】' + (v.seat+1) + ' 号座位，名字 ' + v.name);
   lines.push('你的角色：' + (v.role || '（说书人尚未分配）'));
   if (v.ability) lines.push('角色能力：' + v.ability);
   if (v.faction) lines.push('阵营：' + v.faction);
@@ -248,7 +255,7 @@ function buildPrompt(id, seat) {
   lines.push('【你这一轮要做什么】');
   lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
-  lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号],"text":"私聊内容"}]}');
+  lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}]}');
   lines.push('如果不想私聊，whisper 给空数组。');
   return { prompt: lines.join('\n'), view: v };
 }
@@ -262,9 +269,9 @@ function buildStorytellerNightPrompt(id) {
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
   lines.push('');
-  lines.push('【全场座位与真相】');
+  lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）');
   v.seats.forEach(function (x) {
-    lines.push(x.seat + ':' + x.name + '（' + (x.type === 'human' ? '玩家' : 'Agent')
+    lines.push((x.seat+1) + ' 号：' + x.name + '（' + (x.type === 'human' ? '玩家' : 'Agent')
       + (x.alive ? '，存活' : '，已死亡') + '）角色=' + (x.role || '未分配')
       + (x.markers.length ? (' 标记=' + x.markers.join(',')) : '')
       + (x.info.length ? (' 已告知：' + x.info.map(function (i) { return i.text; }).join(' | ')) : ''));
@@ -280,9 +287,9 @@ function buildStorytellerNightPrompt(id) {
   lines.push('');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的裁判思路（不公开）","say":"你要对全场公开说的话，没有就空字符串",');
-  lines.push(' "info":[{"seat":座位号,"text":"私下告知该玩家的信息"}],');
-  lines.push(' "markers":[{"seat":座位号,"marker":"中毒/醉酒/被保护"}],');
-  lines.push(' "deaths":[座位号],');
+  lines.push(' "info":[{"seat":座位号（1 起）,"text":"私下告知该玩家的信息"}],');
+  lines.push(' "markers":[{"seat":座位号（1 起）,"marker":"中毒/醉酒/被保护"}],');
+  lines.push(' "deaths":[座位号（1 起）],');
   lines.push(' "nextPhase":"day"}');
   return { prompt: lines.join('\n'), view: v };
 }
@@ -296,9 +303,9 @@ function buildStorytellerDayPrompt(id) {
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
   lines.push('');
-  lines.push('【全场座位与真相】');
+  lines.push('【全场座位与真相】（座位号从 1 开始）');
   v.seats.forEach(function (x) {
-    lines.push(x.seat + ':' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配'));
+    lines.push((x.seat+1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配'));
   });
   lines.push('');
   lines.push('【公开对话记录】');
@@ -340,7 +347,7 @@ async function callModel(payload) {
     return {
       mocked: true, text: JSON.stringify({
         think: '（mock 模式：未接入模型）',
-        say: '我是 ' + payload.seat + ' 号，先听听大家怎么说。',
+        say: '我是 ' + (Number(payload.seat)+1) + ' 号，先听听大家怎么说。',
         whisper: []
       })
     };
@@ -438,13 +445,15 @@ async function runRound(id, opts) {
     if (x.type === 'agent' && s.alive[i] && i !== s.storytellerSeat) order.push(i);
   });
   if (!order.length) return { ok: false, error: '没有可驱动的 Agent 座位' };
+  /* limit>0 时只唤醒前 limit 位，用于「让最近说话的几位先接一句」 */
+  const pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
 
-  const run = { running: true, done: 0, total: order.length, current: null, results: [], error: null };
+  const run = { running: true, done: 0, total: pool.length, current: null, results: [], error: null };
   RUNNING.set(id, run);
 
   (async function () {
     try {
-      for (const seat of order) {
+      for (const seat of pool) {
         run.current = seat;
         const built = buildPrompt(id, seat);
         const route = routeFor(id, seat);
@@ -455,12 +464,15 @@ async function runRound(id, opts) {
         if (parsed.think) E.think(id, seat, parsed.think);
         if (parsed.say) E.say(id, seat, parsed.say, 'town');
         (parsed.whisper || []).slice(0, MAX_DM_PER_DAY).forEach(function (w) {
-          E.say(id, seat, w.text, 'private', w.to);
+          /* 模型给的座位号是 1 起，落库用 0 起 */
+          const to = (w.to || []).map(function (n) { return Number(n) - 1; })
+            .filter(function (n) { return n >= 0 && n < s.seats.length && n !== seat; });
+          if (to.length) E.say(id, seat, w.text, 'private', to);
         });
         run.results.push({ seat: seat, say: parsed.say, whispers: (parsed.whisper || []).length, think: parsed.think, error: out.error || null });
         run.done++;
       }
-      E.log(id, '系统', '本轮 Agent 发言结束（' + order.length + ' 位）');
+      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位）');
     } catch (err) {
       run.error = String((err && err.message) || err);
     } finally {
@@ -469,7 +481,7 @@ async function runRound(id, opts) {
     }
   })();
 
-  return { ok: true, started: true, total: order.length, order: order };
+  return { ok: true, started: true, total: pool.length, order: pool };
 }
 
 /* ---------- 说书人 Agent 主持一夜 / 一天 ---------- */
@@ -495,12 +507,19 @@ async function runStoryteller(id, opts) {
       if (out.error) throw new Error(out.error);
       const parsed = parseReply(out.text);
 
+      /* 说书人回包里的座位号从 1 开始，统一在这里折成内部 0 起下标 */
+      function toIdx(n) {
+        const v = Number(n);
+        if (!isFinite(v)) return -1;
+        const i = v - 1;
+        return (i >= 0 && i < s.seats.length) ? i : -1;
+      }
       const applied = { info: 0, markers: 0, deaths: 0, phase: null };
       if (parsed.think) E.think(id, 'storyteller', parsed.think);
       if (parsed.say) E.say(id, 'storyteller', parsed.say, 'town');
-      parsed.info.forEach(function (x) { E.giveInfo(id, x.seat, x.text); applied.info++; });
-      parsed.markers.forEach(function (x) { E.toggleMarker(id, x.seat, x.marker); applied.markers++; });
-      parsed.deaths.forEach(function (seat) { E.execute(id, seat); applied.deaths++; });
+      parsed.info.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.giveInfo(id, i, x.text); applied.info++; } });
+      parsed.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
+      parsed.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
       if (parsed.nextPhase) {
         const r = E.setPhase(id, parsed.nextPhase);
         if (r && r.ok) applied.phase = parsed.nextPhase;

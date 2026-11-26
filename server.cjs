@@ -73,6 +73,7 @@ function buildApi(opts){
   nominate: (b) => E.nominate(b.id,b.from,b.target),
   vote: (b) => E.vote(b.id,b.seat,b.target),
   execute: (b) => E.execute(b.id,b.seat),
+  kill: (b) => E.kill(b.id,b.seat,b.reason||''),
   marker: (b) => E.toggleMarker(b.id,b.seat,b.marker),
   seatModel: (b) => E.setSeatModel(b.id, b.seat, b.provider, b.model, b.name),
   checkWin: (b) => E.checkWin(b.id),

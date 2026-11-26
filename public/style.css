@@ -79,9 +79,11 @@ textarea{width:100%;min-height:56px;background:#221d18;color:var(--parch);border
 .tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}.tabs button{flex:1 1 30%;min-width:90px;font-size:13px;padding:8px 6px}.tabs button.active{background:#0e0c0a;color:#8f7f64;border-color:#3a3024;opacity:.68;box-shadow:inset 0 0 0 1px #3a3024}
 .story-panel{background:#1d1712;border:1px dashed var(--gold);border-radius:6px;padding:8px;margin-bottom:8px}
 /* 群聊/私聊 */
-.msg{padding:4px 6px;border-radius:6px;margin-bottom:4px;font-size:13px}
-.msg.town{background:#f4f4f6}
-.msg.dm{background:#fff2cc;border-left:3px solid #e6a700}
+.msg{padding:5px 8px;border-radius:6px;margin-bottom:5px;font-size:13px;line-height:1.65;color:var(--parch)}
+.msg b{color:var(--gold);margin-right:4px}
+.msg.town{background:#191510;border-left:2px solid #4a3c28}
+.msg.dm{background:#1d1a26;border-left:3px solid #7a68d8}
+.msg .dmto{color:#9c8b6d}
 .section .row input[type=checkbox]{margin-right:3px}
 .seatnum{display:inline-block;font-size:11px;font-weight:900;color:var(--gold);background:#0e0c0a;border:1px solid #6b5a3e;border-radius:10px;padding:0 6px;line-height:16px;margin-bottom:2px}
 .errbox{background:#3a1416;border:1px solid var(--blood);color:#ffb3b3;font-size:12px;padding:8px;border-radius:6px;margin-bottom:10px}
@@ -90,6 +92,16 @@ textarea{width:100%;min-height:56px;background:#221d18;color:var(--parch);border
 .wikitags{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
 .wikitag{display:block;font-size:12px;padding:4px 6px;border:1px solid #4a3c28;border-radius:6px;background:#1b1610;color:var(--parch);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 .wikiview{font-size:12px;line-height:1.7}
+.wikitag{cursor:pointer}
+.wikitag:hover{color:#fff;border-color:var(--gold)}
+.wikihead{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #4a3c28}
+.wikihead b{font-size:15px;color:var(--gold)}
+.wikiback{font-size:12px;padding:4px 10px;background:transparent;border:1px solid #4a3c28;color:var(--parch);border-radius:6px;cursor:pointer}
+.wikiback:hover{border-color:var(--gold);color:var(--gold)}
+.wikibody{font-size:13px;line-height:1.85;max-height:none}
+.wikibody p{margin:0 0 10px}
+.wikibody h4{margin:16px 0 8px;font-size:14px;color:var(--gold);border-left:3px solid var(--accent);padding-left:8px}
+body.night .wikiback,body.night .wikihead{border-color:var(--edge2)}
 
 .stbox{position:absolute;left:14px;top:14px;z-index:5;display:flex;flex-direction:column;align-items:center;gap:2px;width:104px}
 .sttoken{width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;color:#f3e6c8;background:radial-gradient(circle at 35% 30%,#4a3418,#1a1208);border:2px solid var(--gold);box-shadow:0 0 14px rgba(201,162,39,.45)}

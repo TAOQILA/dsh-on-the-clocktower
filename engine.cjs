@@ -108,6 +108,9 @@ function assignRole(id, seat, role){
 function giveInfo(id, seat, text){
   const s = loadState(id);
   (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text});
+  /* 若信息里写明「你的角色是【X】」，顺手把角色落到 roles，保证身份面板/胜负判定/夜间顺序一致 */
+  const m = String(text||'').match(/你的角色是[【\[]([^】\]]+)[】\]]/);
+  if (m && m[1] && !s.roles[seat]) { s.roles[seat] = m[1].trim(); }
   agentLog(id,seat,'actions',{kind:'info_received',text});
   saveState(id,s);
   return {ok:true};
@@ -134,7 +137,18 @@ function vote(id, seat, target){
 function execute(id, seat){
   const s = loadState(id);
   s.alive[seat]=false; s.markers[seat].push('死亡');
-  saveState(id,s); log(id,'系统',s.seats[seat].name+' 被处决');
+  saveState(id,s); log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+' 被处决');
+  const w = checkWin(id);
+  return {ok:true, win:w};
+}
+/* 夜间死亡（非处决）：与处决分开记账，避免日志写错 */
+function kill(id, seat, reason){
+  const s = loadState(id);
+  if (!(seat >= 0 && seat < s.seats.length)) return {ok:false, error:'座位越界'};
+  if (!s.alive[seat]) return {ok:false, error:'该座位已经死亡'};
+  s.alive[seat]=false; s.markers[seat].push('死亡');
+  saveState(id,s);
+  log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+' 在夜里死亡'+(reason?('（'+reason+'）'):''));
   const w = checkWin(id);
   return {ok:true, win:w};
 }
@@ -156,6 +170,9 @@ function checkWin(id){
   const s = loadState(id);
   if (s.win && s.win.over) return s.win;
   if (!s.roles || !Object.keys(s.roles).length) return { over:false };
+  /* 还没分配到恶魔，说明本局角色尚未真正落地，不能据此判定胜负 */
+  const anyDemon = Object.keys(s.roles).some(function(k){ return roleFaction(s.roles[k]) === 'demon'; });
+  if (!anyDemon) return { over:false };
   const aliveSeats = [];
   (s.seats||[]).forEach(function(x,i){ if (s.alive[i]) aliveSeats.push(i); });
   let demonAlive = false;
@@ -252,5 +269,5 @@ function createAndStart(cfg){
 }
 
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase,
-  assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, toggleMarker, listGames,
+  assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction };
