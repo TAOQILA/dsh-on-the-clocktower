@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.0';
+var VERSION = '0.6.1';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -329,28 +329,15 @@ function storyPanel(seats,sel,roles,phase){
     '<textarea id="say" readonly placeholder="Agent 发言显示在这里"></textarea></div>' +
     roundSection();
 }
-/* 模型面板：开局前后都能改，说书人与每个座位各自独立 */
+/* 模型面板：只放说书人自己的模型；各座位模型在「魔典」页点座位改。 */
 function modelPanel(){
   var g = S.game; if(!g) return '';
-  var seats = g.seats || [];
-  var stAgent = g.storyteller && g.storyteller.type === 'agent';
-  var rows = '';
-  if (stAgent) {
-    rows += '<div class="row">说书人：'+modelSelect('stModelSel', g.storyteller.provider, g.storyteller.model,
-      'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>';
-  } else {
-    rows += '<div class="row">说书人：<b>你</b>（无需模型）</div>';
-  }
-  var selOpts = seats.map(function(s,i){ return opt(i, (i+1)+' 号 · '+s.name+(s.type==='human'?'（你）':'') , S.selSeat); }).join('');
-  var cur = seats[S.selSeat] || {};
-  var agentSeat = cur.type !== 'human';
-  rows += '<div class="row">座位：<select onchange="S.selSeat=+this.value;render()">'+selOpts+'</select>'+
-    (agentSeat
-      ? modelSelect('gmSeatModelSel', cur.provider, cur.model, 'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)')
-      : '<b>你</b>（无需模型）')+'</div>';
-  return '<div class="section"><h3>模型</h3>'+
-    '<p class="muted">每个座位、以及说书人，都可以单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型。改动立刻生效，无需重开。</p>'+
-    rows+'</div>';
+  var st = g.storyteller || {};
+  if (st.type !== 'agent') return '';
+  return '<div class="section"><h3>说书人的模型</h3>'+
+    '<p class="muted">本局说书人由 Agent 担任。「跟随默认模型」即用 DSH 当前的默认对话模型，改动立刻生效。</p>'+
+    '<div class="row">说书人：'+modelSelect('stModelSel', st.provider, st.model,
+      'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div></div>';
 }
 /* 轮次驱动器：一次唤醒全场存活 Agent，按座位顺序串行发言 */
 function roundSection(){
