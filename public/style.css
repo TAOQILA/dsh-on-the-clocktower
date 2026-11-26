@@ -238,6 +238,11 @@ body.night *::-webkit-scrollbar-thumb:hover{background:#4b3f7d;background-clip:c
 .dmhead .dmclose:hover{background:#3a2f5c}
 .dmwho{font-size:12px;color:#a99be0;margin:0}
 .dmtargets{display:flex;flex-wrap:wrap;gap:4px 10px;max-height:84px;overflow:auto;font-size:12px}
+.dmtab{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font-size:12px;line-height:1.5;padding:3px 9px;border:1px solid #6b5a3e;border-radius:12px;background:#1b1610;color:var(--parch);cursor:pointer}
+.dmtab:hover{border-color:var(--gold);color:var(--gold)}
+.dmtab.on{background:#7a68d8;border-color:#a99be0;color:#fff;font-weight:900}
+body.night .dmtab{background:#141128;border-color:#463c73;color:#cfc6ff}
+body.night .dmtab.on{background:#7a68d8;border-color:#b7a9ff;color:#0b0a14}
 .dmtarget{display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap}
 .dmtarget input{margin:0}
 .dmcol .log.dmlog{flex:1 1 auto;min-height:80px;max-height:none;overflow:auto;background:#100d1e;border:1px solid #2f2750}

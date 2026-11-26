@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.11.5';
+var VERSION = '0.11.6';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -859,20 +859,31 @@ function agentStorySection(){
   if (!S.game) return '';
   var st = S.story || {running:false,result:null,error:null};
   var res = st.result;
+  var phase = (S.game||{}).phase;
+  /* 运行中只显示「正在做什么」的公开流程描述，绝不暴露说书人手里的内容 */
+  var doing = '';
+  if (phase === 'night') doing = '正在按夜间顺序核对在场角色、唤醒角色、整理要私下告知的内容，并结算死亡与状态。';
+  else if (phase === 'day' || phase === 'nomination' || phase === 'vote') doing = '正在梳理场上的讨论、权衡善良与邪恶双方的局势，判断是否发起提名处决。';
+  else doing = '正在主持这一阶段。';
   var out = '';
-  if (st.running) out = '<div class="muted">说书人思考中…</div>';
+  if (st.running) out = '<div class="muted">说书人正在思考：'+doing+'</div>';
   else if (res){
-    out = '<div class="log" data-keep="storyLog" style="max-height:260px">'+
-      (res.say?('<div><b>说书人</b> '+res.say+'</div>'):'')+
-      (res.applied?('<div class="muted">告知 '+(res.applied.info||0)+' 条 · 标记 '+(res.applied.markers||0)+' 个 · 死亡 '+(res.applied.deaths||0)+' 人'+(res.applied.phase?(' · 进入 '+res.applied.phase):'')+'</div>'):'')+
+    /* 只展示公开结果：说出口的话、死亡人数、进入的阶段、投票；不显示私有信息与标记数量 */
+    var pub = [];
+    if (res.applied && res.applied.deaths) pub.push('本阶段有 '+res.applied.deaths+' 人出局');
+    if (res.applied && res.applied.vote) pub.push('投票：'+res.applied.vote);
+    if (res.applied && res.applied.phase) pub.push('进入 '+res.applied.phase);
+    out = '<div class="log" data-keep="storyLog" style="max-height:260px">' +
+      (res.say?('<div><b>说书人</b> '+esc(res.say)+'</div>'):'') +
+      (pub.length?('<div class="muted">'+esc(pub.join(' · '))+'</div>'):'') +
       '</div>';
-  } else if (st.error) out = '<div class="errbox">说书人出错：'+st.error+'</div>';
-  return '<div class="section"><h3>Agent 说书人主持</h3>'+
-    '<p class="muted">按当前阶段（'+(PHZH[(S.game||{}).phase]||'')+'）让说书人 Agent 依规则宣布夜晚行动、下发私密信息、结算死亡并推进阶段。</p>'+
-    '<div class="row"><button onclick="runStory()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中…':'让说书人 Agent 主持这一阶段')+'</button></div>'+
+  } else if (st.error) out = '<div class="errbox">说书人出错：'+esc(st.error)+'</div>';
+  return '<div class="section"><h3>Agent 说书人主持</h3>' +
+    '<p class="muted">本局说书人由 Agent 担任，它会依规则主持当前阶段。下面只显示它公开的动作，私密信息不会显示在这里。</p>' +
+    (iAmStoryteller(S.game) ? '<div class="row"><button onclick="runStory()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中…':'让说书人 Agent 主持这一阶段')+'</button></div>' : '') +
     out+'</div>';
 }
-/* 说书人为「我」时：底部给一个「交给 Agent 代主持」的入口 + 结束对局 */
+
 function agentEndRow(){
   return '<div class="section"><h3>结束对局</h3>'+
     '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
@@ -1276,7 +1287,6 @@ function chatPanel(g){
   if (!g) return '<div class="chatempty muted">先在「建局」创建对局，这里会显示公聊。</div>';
   var ro = !iAmStoryteller(g) && !iAmPlayer(g);
   return '<div class="chatwrap"><h3>公聊</h3>'
-    + '<p class="chatwho muted">' + chatSelfLabel(g) + deadNote(g) + '</p>'
     + '<div id="chatLog" class="log chatlog" data-keep="chatLog" data-count="' + ((S.chatMsgs || []).length) + '">' + chatMsgsHtml(g, 'town') + '</div>'
     + (ro
       ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>'
@@ -1302,15 +1312,16 @@ function dmPanel(g){
   if (selfIdx !== -1){
     who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
   }
+  var whoTargets = night ? (selfIdx !== -1 ? '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>' : '') : who;
   return '<div class="dmcol"><div class="dmhead"><b>私聊</b>'
     + '<button class="dmclose" onclick="toggleDm()" title="收起私聊">×</button></div>'
-    + '<p class="chatwho muted">' + chatSelfLabel(g) + '</p>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
-      : (night ? '<p class="muted">夜晚禁止私聊，只能公聊。</p>'
+      : (night
+        ? '<p class="muted">夜晚禁止玩家间私聊，只可与说书人私聊。</p>' + '<div class="dmwho">私聊对象：<div class="dmtargets">' + whoTargets + '</div></div>'
         : '<div class="dmwho">私聊对象：<div class="dmtargets">' + who + '</div></div>'))
     + '<div id="dmLog" class="log chatlog dmLog">' + chatMsgsHtml(g, 'private') + '</div>'
-    + ((ro || night) ? ''
-      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="悄悄话…（输入 @ 可以直接 @人）" value="' + esc(S.dmDraft || '') + '" oninput="chatInput(this,\'dm\')" onfocus="S.activeInput=\'dm\'" onblur="blurInput()" onkeydown="chatKey(event,\'dm\')"><button onclick="sendDm()">发送</button></div>')
+    + (ro ? ''
+      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="悄悄话…（输入 @ 可以直接 @人）" value="' + esc(S.dmDraft || '') + '" oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()">发送</button></div>')
     + '<div id="mentionPop-dm" class="mentionpop"></div>'
     + '</div>';
 }
