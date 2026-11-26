@@ -31,6 +31,17 @@ client.js + index.js 为 DSH client-plugin：左侧栏粗体「染」按钮 → 
 AGENT_ENDPOINT 指向 HTTP 服务，接收 {game,seat,prompt,nonce,role,phase,info}，返回 {text,think?}。
 说书人阅读包为 data/wiki/INDEX.md，所有 Agent 开局须返回带 nonce 的 READ_ACK。
 
+### 手机 / 同一网络访问
+
+服务默认只监听 127.0.0.1，只有本机能打开。要让同一 Wi-Fi 下的手机访问，用环境变量放开监听：
+
+    BOTC_HOST=0.0.0.0 node server.cjs
+
+启动日志会打印形如 `http://192.168.x.x:6325/` 的局域网地址，手机浏览器直接打开即可。
+在 DSH 里跑插件时同理：设置环境变量 BOTC_HOST=0.0.0.0 后重启 DSH，插件面板的「建局」页会列出手机可用的地址。
+
+注意：魔典没有登录验证，同一网络内任何人都能打开并操作；只在可信网络使用，玩完关闭服务或 DSH。
+
 ## 对局归档
 
 每局写入 data/games/<时间_剧本_人数>/：game.json、meta.json、state/current.json 与 turn-*.json、
