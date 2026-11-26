@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.10.5';
+var VERSION = '0.10.6';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -323,7 +323,7 @@ function render(force){
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
     '<div class="layout'+(S.hideChat?' nochat':'')+(S.hideSide?' noside':'')+'">'+
     '<div class="right" data-keep="right">'+ (S.hideSide
-      ? '<button class="sideexpand" onclick="toggleSide()" title="展开侧栏">‹<br>侧<br>栏</button>'
+      ? '<button class="sideexpand" onclick="toggleSide()" title="展开侧栏"><span class="sidearrow">‹</span><span>侧栏</span></button>'
       : '<button class="sidefold" onclick="toggleSide()" title="收起侧栏">收起侧栏 ›</button>'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel) +'</div>'+
     '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div>'+
@@ -334,7 +334,7 @@ function render(force){
     '</div>'+ dmFloating(g) +'</div>'+
     '<div class="chatcol"><div class="chatbar">'+
       '<button class="dmopen'+(S.showDm?' on':'')+'" onclick="toggleDm()" title="打开 / 收起私聊" '+(g?'':'disabled')+'>'+(S.showDm?'× 收起私聊':'私聊')+'</button>'+
-      '<button class="chatfold" onclick="toggleChat()" title="收起 / 展开聊天">'+(S.hideChat?'‹ 展开聊天':'收起聊天 ›')+'</button>'+
+      '<button class="chatfold" onclick="toggleChat()" title="收起 / 展开聊天">'+(S.hideChat?'<span class="sidearrow">›</span><span>聊天</span>':'收起聊天 ›')+'</button>'+
     '</div>'+
     (S.hideChat?'':'<div class="chatinner">'+ chatPanel(g) +'</div>')+'</div></div>';
   drawTable(seats,g);

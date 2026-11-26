@@ -54,9 +54,9 @@ button:hover{background:var(--accent)}button:disabled{opacity:.4;cursor:not-allo
 input,select{background:#221d18;color:var(--parch);border:1px solid #6b5a3e;border-radius:5px;padding:7px 10px;font-family:inherit}
 .layout{display:grid;grid-template-columns:minmax(440px,560px) minmax(240px,1fr) minmax(420px,560px);gap:14px;padding:14px;height:calc(100vh - 52px)}
 .layout.nochat{grid-template-columns:minmax(440px,560px) minmax(240px,1fr) 66px}
-.layout.noside{grid-template-columns:minmax(440px,560px) minmax(0,1fr) 40px}
+.layout.noside{grid-template-columns:minmax(440px,560px) minmax(0,1fr) 56px}
 .layout.noside .right{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:8px 2px;overflow:hidden}
-.layout.nochat.noside{grid-template-columns:66px minmax(0,1fr) 40px}
+.layout.nochat.noside{grid-template-columns:66px minmax(0,1fr) 56px}
 .left,.right{border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,rgba(36,28,22,var(--panel-alpha)),rgba(20,17,14,var(--panel-alpha)));backdrop-filter:blur(2px)}
 .left{position:relative;min-height:0;display:grid;place-items:center;padding:14px;overflow:hidden;container-type:size}.right{overflow-y:auto;padding:16px}
 .table{position:relative;aspect-ratio:1 / 1;min-height:0;margin:0;justify-self:center;align-self:center;
@@ -196,7 +196,7 @@ body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 .chatinner{display:flex;flex-direction:column;min-height:0;flex:1}
 .sidefold{align-self:flex-end;margin-bottom:6px;font-size:12px;padding:3px 9px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
 .sidefold:hover{color:var(--gold);border-color:var(--gold)}
-.sideexpand{width:100%;flex:1 1 auto;font-size:12px;line-height:1.3;padding:10px 2px;border-radius:8px;background:rgba(0,0,0,.34);border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer;writing-mode:vertical-rl;letter-spacing:2px}
+.sideexpand{width:100%;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;line-height:1.15;padding:7px 2px;border-radius:8px;background:rgba(0,0,0,.34);border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer;letter-spacing:0;writing-mode:horizontal-tb}
 .sideexpand:hover{color:var(--gold);border-color:var(--gold)}
 .chatbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .dmopen{font-size:12px;font-weight:900;padding:4px 12px;border-radius:14px;background:linear-gradient(160deg,#7a68d8,#4b3a8f);border:1px solid #b7a9ff;color:#fff;cursor:pointer}
@@ -206,7 +206,7 @@ body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 .chatfold{margin-left:auto;margin-bottom:0;font-size:12px;padding:4px 10px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
 .chatfold:hover{color:var(--gold);border-color:var(--gold)}
 .layout.nochat .chatcol{padding:8px 4px;align-items:center}
-.layout.nochat .chatfold{writing-mode:vertical-rl;letter-spacing:2px;padding:10px 4px;margin:0 auto}
+.layout.nochat .chatfold{writing-mode:horizontal-tb;letter-spacing:0;padding:7px 2px;margin:0;width:100%;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;line-height:1.15}
 .msg .who{display:inline-flex;align-items:center;gap:6px;margin-right:6px}
 .snbadge{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 6px;border-radius:11px;font-size:12px;font-weight:900;color:#12100c;letter-spacing:.5px}
 .snbadge.stbadge{background:linear-gradient(160deg,#f0d67a,#c9a227);color:#2a1f06;font-size:11px}
@@ -279,8 +279,8 @@ body.nobg #bgwrap{display:none}
 /* 背景开启时：界面本身透明，让背景贯通；只有圆桌保留底色 */
 body.hasbg{background:transparent}
 body.hasbg header{background:transparent;border-bottom-color:rgba(0,0,0,.18)}
-body.hasbg .left,body.hasbg .right,body.hasbg .chatcol{background:transparent;border-color:rgba(255,255,255,.14)}
-body.hasbg.night .left,body.hasbg.night .right,body.hasbg.night .chatcol{background:transparent;border-color:rgba(160,148,220,.22)}
+body.hasbg .left,body.hasbg .right,body.hasbg .chatcol{background:rgba(14,12,18,var(--panel-alpha,.75));border-color:rgba(255,255,255,.14)}
+body.hasbg.night .left,body.hasbg.night .right,body.hasbg.night .chatcol{background:rgba(10,9,22,var(--panel-alpha,.75));border-color:rgba(160,148,220,.22)}
 body.hasbg.night header{background:transparent}
 body.hasbg .log,body.hasbg.night .log,body.hasbg.night .log.chatlog{background:rgba(8,7,12,.55)}
 body.hasbg .chatcol{backdrop-filter:blur(1px)}
@@ -305,3 +305,5 @@ body.hasbg.night .idcard.st{background:rgba(20,16,40,.55)}
 body.hasbg.night .story-panel{background:rgba(16,13,32,.5)}
 body.hasbg .section h3{border-bottom-color:rgba(255,255,255,.16)}
 body.hasbg.night .section h3{border-bottom-color:rgba(160,148,220,.24)}
+
+.sidearrow{font-size:15px;line-height:1;font-weight:900}
