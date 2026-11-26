@@ -1,3 +1,15 @@
+/*
+ * DSH on the Clocktower（血染钟鱼）
+ * Copyright (C) 2026 TAOQILA
+ *
+ * 本项目以 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。
+ * 完整条款见项目根目录的 LICENSE 文件，或 <https://www.gnu.org/licenses/agpl-3.0.txt>。
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free Software
+ * Foundation, version 3 of the License. There is NO WARRANTY, to the extent permitted
+ * by law. See the LICENSE file for details.
+ */
 'use strict';
 /* 血染钟鱼 - 本地服务：静态文件 + 对局 API + Agent 适配器接口
  * 既可作为独立进程运行（node server.cjs），也可由宿主端插件在 DSH 进程内启动，

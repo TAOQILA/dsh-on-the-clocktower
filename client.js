@@ -1,3 +1,15 @@
+/*
+ * DSH on the Clocktower（血染钟鱼）
+ * Copyright (C) 2026 TAOQILA
+ *
+ * 本项目以 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。
+ * 完整条款见项目根目录的 LICENSE 文件，或 <https://www.gnu.org/licenses/agpl-3.0.txt>。
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free Software
+ * Foundation, version 3 of the License. There is NO WARRANTY, to the extent permitted
+ * by law. See the LICENSE file for details.
+ */
 /* DSH on the Clocktower - 左侧栏粗体「染」按钮 client-plugin
  * 面板只保留一个按钮：在系统浏览器中打开魔典。
  * 魔典服务由宿主端 index.js 在 DSH 进程内启动于 127.0.0.1:6325，

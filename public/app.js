@@ -1,5 +1,17 @@
+/*
+ * DSH on the Clocktower（血染钟鱼）
+ * Copyright (C) 2026 TAOQILA
+ *
+ * 本项目以 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。
+ * 完整条款见项目根目录的 LICENSE 文件，或 <https://www.gnu.org/licenses/agpl-3.0.txt>。
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free Software
+ * Foundation, version 3 of the License. There is NO WARRANTY, to the extent permitted
+ * by law. See the LICENSE file for details.
+ */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.2';
+var VERSION = '0.6.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){

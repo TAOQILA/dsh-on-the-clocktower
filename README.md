@@ -6,6 +6,7 @@
 - 英文名：DSH on the Clocktower
 - 最新版本：0.5.0
 - 仓库：https://github.com/TAOQILA/dsh-on-the-clocktower
+- 许可证：GNU AGPL-3.0（AGPL-3.0-only）
 
 ## 项目结构
 
@@ -35,9 +36,22 @@ AGENT_ENDPOINT 指向 HTTP 服务，接收 {game,seat,prompt,nonce,role,phase,in
 每局写入 data/games/<时间_剧本_人数>/：game.json、meta.json、state/current.json 与 turn-*.json、
 agents/seat-NN/{think,speech,actions}.jsonl、transcript-entries.jsonl。
 
+## 开源许可 / License
+
+本项目以 **GNU Affero General Public License v3.0（AGPL-3.0-only）** 发布，全文见 [LICENSE](LICENSE)。
+
+- 你可以自由使用、修改、分发本项目，包括商业使用；分发修改版或以网络服务形式提供修改版时，
+  必须同样以 AGPL-3.0 开放**完整对应源代码**（第 13 条：远程网络交互同样需要提供源码）。
+- 本项目不提供任何担保，详见许可证第 15、16 条。
+- 角色名称、规则文本等第三方内容不在本许可证授权范围内，见下方免责声明。
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only).
+See [LICENSE](LICENSE) for the full text. If you run a modified version as a network service,
+section 13 requires you to offer its complete corresponding source to remote users.
+
 ## 免责声明 / Disclaimer
 
-- 本项目仅供**个人学习、研究与娱乐**使用，**严禁用于任何商业用途**，不得将项目内资料用于售卖、商业化分发或牟利。
+- **源代码**依 AGPL-3.0 授权，允许包括商业使用在内的任何用途；下述限制**仅针对项目内收录的第三方资料**（角色能力、规则文本、设定等），这些资料不得用于售卖、商业化分发或牟利。
 - 项目内的角色能力、规则文本、设定资料等内容，其著作权及相关权利归**各自原权利人**所有；本项目不主张任何权利。
 - 本项目与任何官方游戏、发行方或社区组织均无关联。
 - 使用者须自行确保使用行为符合所在地区的法律法规；因使用本项目产生的任何责任由使用者自行承担。

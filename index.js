@@ -1,3 +1,15 @@
+/*
+ * DSH on the Clocktower（血染钟鱼）
+ * Copyright (C) 2026 TAOQILA
+ *
+ * 本项目以 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。
+ * 完整条款见项目根目录的 LICENSE 文件，或 <https://www.gnu.org/licenses/agpl-3.0.txt>。
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free Software
+ * Foundation, version 3 of the License. There is NO WARRANTY, to the extent permitted
+ * by law. See the LICENSE file for details.
+ */
 /**
  * DSH on the Clocktower — host half.
  *
@@ -19,7 +31,7 @@ export const inject = []
 const MOUNT = '/dsh-on-the-clocktower'
 const PORT = Number(process.env.BOTC_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
 const MAX_TOKENS = 1200
-const VERSION = '0.6.2'
+const VERSION = '0.6.3'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
