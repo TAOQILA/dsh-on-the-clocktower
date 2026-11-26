@@ -123,7 +123,53 @@ function execute(id, seat){
   const s = loadState(id);
   s.alive[seat]=false; s.markers[seat].push('死亡');
   saveState(id,s); log(id,'系统',s.seats[seat].name+' 被处决');
-  return {ok:true};
+  const w = checkWin(id);
+  return {ok:true, win:w};
+}
+
+/* 阵营表：从 data/roles.json 读角色→阵营，供胜负判定使用 */
+let ROLE_FACTION = null;
+function roleFaction(name){
+  if (!ROLE_FACTION){
+    ROLE_FACTION = {};
+    try {
+      const list = JSON.parse(fs.readFileSync(path.join(__dirname,'data','roles.json'),'utf8'));
+      (Array.isArray(list)?list:(list.roles||[])).forEach(function(r){ ROLE_FACTION[r.name]=r.faction; });
+    } catch(e){}
+  }
+  return ROLE_FACTION[name] || null;
+}
+/* 胜负判定：恶魔出局→善良胜；存活≤2 人且恶魔仍在→邪恶胜 */
+function checkWin(id){
+  const s = loadState(id);
+  if (s.win && s.win.over) return s.win;
+  if (!s.roles || !Object.keys(s.roles).length) return { over:false };
+  const aliveSeats = [];
+  (s.seats||[]).forEach(function(x,i){ if (s.alive[i]) aliveSeats.push(i); });
+  let demonAlive = false;
+  aliveSeats.forEach(function(i){ if (roleFaction(s.roles[i]) === 'demon') demonAlive = true; });
+  let win = null;
+  if (!demonAlive){
+    win = { over:true, side:'good', reason:'恶魔已出局', at:new Date().toISOString() };
+  } else if (aliveSeats.length <= 2){
+    win = { over:true, side:'evil', reason:'场上仅剩 ' + aliveSeats.length + ' 人且恶魔仍在', at:new Date().toISOString() };
+  }
+  if (win){
+    s.phase = 'ended'; s.win = win; s.winner = win.side;
+    saveState(id, s);
+    log(id, '系统', '对局结束：' + (win.side==='good'?'善良阵营胜利':'邪恶阵营胜利') + '（' + win.reason + '）');
+    return win;
+  }
+  return { over:false };
+}
+/* 手动宣布终局 */
+function endGame(id, side, reason){
+  const s = loadState(id);
+  const w = { over:true, side: side==='evil'?'evil':'good', reason: reason || '说书人宣布结束', at:new Date().toISOString() };
+  s.phase = 'ended'; s.win = w; s.winner = w.side;
+  saveState(id, s);
+  log(id, '说书人', '宣布终局：' + (w.side==='good'?'善良阵营胜利':'邪恶阵营胜利') + '（' + w.reason + '）');
+  return { ok:true, win:w };
 }
 function toggleMarker(id, seat, marker){
   const s = loadState(id);
@@ -195,4 +241,4 @@ function createAndStart(cfg){
 
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, toggleMarker, listGames,
-  agentLog, gameDir };
+  agentLog, gameDir, checkWin, endGame, roleFaction };

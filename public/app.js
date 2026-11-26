@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.1';
+var VERSION = '0.6.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -8,7 +8,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'' };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -39,10 +39,15 @@ function defaultSeats(n){
 }
 function opt(v,label,cur){ return '<option value="'+v+'" '+(cur===v?'selected':'')+'>'+label+'</option>'; }
 /* 模型目录：由宿主端注入（读 DSH 已配置的 provider/model 清单） */
+/* 模型名里常带倍率后缀，如 "gpt-5.6-sol (0.6x)"，展示时去掉 */
+function stripRate(s){ return String(s||'').replace(/\s*[\(（]\s*[0-9.]+\s*[xX×]\s*[\)）]\s*$/,'').trim(); }
 function modelPairs(){
   var out = [], cat = S.models || {providers:[]};
   (cat.providers||[]).forEach(function(p){
-    (p.models||[]).forEach(function(m){ out.push({provider:p.id, model:m.id, name:m.name||'', label:p.id+' / '+(m.name||m.id), key:p.id+'/'+m.id}); });
+    (p.models||[]).forEach(function(m){
+      var nm = stripRate(m.name || '') || m.id;
+      out.push({provider:p.id, model:m.id, name:nm, label:p.id+' / '+nm, key:p.id+'/'+m.id});
+    });
   });
   return out;
 }
@@ -93,6 +98,7 @@ function render(){
     tabsHtml += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\''+t+'\')">'+TABS[t]+'</button>';
   });
   var panel = '';
+  var idCard = myIdentityPanel();
   if (S.tab==='setup') panel = setupPanel();
   else if (S.tab==='story') panel = storyPanel(seats,sel,roleNames,cur);
   else if (S.tab==='chat') panel = chatPanel(g);
@@ -105,7 +111,7 @@ function render(){
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
     '<div class="layout"><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
-    '</div></div><div class="right"><div class="tabs">'+tabsHtml+'</div>'+panel+'</div></div>';
+    '</div></div><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div></div>';
   drawTable(seats,g);
 }
 function drawTable(seats,g){
@@ -299,9 +305,35 @@ async function startGame(){
     S.starting = false; render();
   }
 }
+/* 顶部身份卡：你是谁、你看到什么（玩家显示自己的角色与私有信息） */
+function myIdentityPanel(){
+  var g = S.game; if(!g) return '';
+  if (iAmSpectator(g)) return '<div class="idcard spec"><b>旁观</b><span class="muted">你可以看魔典、看日志，但不能操作。</span></div>';
+  if (iAmStoryteller(g)) return '<div class="idcard st"><b>你是说书人</b><span class="muted">全场信息对你可见，由你主持夜晚与白天。</span></div>';
+  var v = S.view || {};
+  var role = v.role || '未分配';
+  var fac = v.faction ? ('（'+v.faction+'）') : '';
+  var ab = v.ability ? ('<div class="idline muted">'+v.ability+'</div>') : '';
+  var pins = (v.privateInfo && v.privateInfo.length) ? ('<div class="idline">私有信息：'+v.privateInfo.join('；')+'</div>') : '';
+  var quota = (typeof v.dmQuotaLeft === 'number') ? ('<span class="muted">今日私聊剩余 '+v.dmQuotaLeft+' 次</span>') : '';
+  return '<div class="idcard me"><b>你是 '+(mySeatInGame(g)+1)+' 号 '+((g.seats[mySeatInGame(g)]||{}).name||'')+'</b>'+
+    '<div class="idline">角色：<b>'+role+'</b>'+fac+' '+(v.alive===false?'（已出局）':'')+'</div>'+ab+pins+
+    '<div class="idline">'+quota+'</div></div>';
+}
+/* 终局横幅 */
+function winBanner(g){
+  if(!g || !g.win || !g.win.over) return '';
+  var good = g.win.side === 'good';
+  return '<div class="winbanner '+(good?'good':'evil')+'">'+
+    '<div class="wintitle">'+(good?'善良阵营胜利':'邪恶阵营胜利')+'</div>'+
+    '<div class="muted">'+(g.win.reason||'')+'</div></div>';
+}
 function seatPanel(seats,sel){
-  var speakPart = S.game ?
+  var ro = S.game && !canControl();
+  var speakPart = (S.game && !ro) ?
     ('<div class="row"><button onclick="api(\'say\',{id:S.game.id,seat:'+S.selSeat+',text:document.getElementById(\'say\').value,channel:\'town\'}).then(refresh)">发言</button></div><textarea id="say" placeholder="以该座位发言..."></textarea>') : '';
+  if (ro) return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
+    '<p class="muted">旁观模式：只能查看，不能改名、换模型或替 Agent 发言。</p></div>';
   return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
     '<div class="row">身份：<b>'+((meZone()==='seat'&&S.me.seat===S.selSeat)?'你（真人玩家）':'Agent 玩家')+'</b>'+
     (S.game?'':' <button onclick="dropMe(\'seat\','+S.selSeat+')">把「你」放到这里</button>')+'</div>'+
@@ -311,6 +343,36 @@ function seatPanel(seats,sel){
 }
 function storyPanel(seats,sel,roles,phase){
   if (!S.game) return '<p class="muted">请先在「建局」中创建对局。</p>';
+  if (S.game.win && S.game.win.over) return '<p class="muted">本局已结束。可到「日志」里回看，或在「建局」里开新局。</p>';
+  if (!iAmStoryteller(S.game)) return '<div class="section"><h3>说书人</h3><p class="muted">本局说书人由 Agent「'+S.game.storyteller.name+'」担任，你没有主持人权限。</p></div>'+ agentStorySection();
+  return humanStoryPanel(seats,sel,roles,phase) + agentEndRow();
+}
+/* 说书人为 Agent 时：让 Agent 主持夜晚/白天 */
+function agentStorySection(){
+  if (!S.game) return '';
+  var st = S.story || {running:false,result:null,error:null};
+  var res = st.result;
+  var out = '';
+  if (st.running) out = '<div class="muted">说书人思考中…</div>';
+  else if (res){
+    out = '<div class="log" style="max-height:260px">'+
+      (res.say?('<div><b>说书人</b> '+res.say+'</div>'):'')+
+      (res.applied?('<div class="muted">告知 '+(res.applied.info||0)+' 条 · 标记 '+(res.applied.markers||0)+' 个 · 死亡 '+(res.applied.deaths||0)+' 人'+(res.applied.phase?(' · 进入 '+res.applied.phase):'')+'</div>'):'')+
+      '</div>';
+  } else if (st.error) out = '<div class="errbox">说书人出错：'+st.error+'</div>';
+  return '<div class="section"><h3>Agent 说书人主持</h3>'+
+    '<p class="muted">按当前阶段（'+(PHZH[(S.game||{}).phase]||'')+'）让说书人 Agent 依规则宣布夜晚行动、下发私密信息、结算死亡并推进阶段。</p>'+
+    '<div class="row"><button onclick="runStory()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中…':'让说书人 Agent 主持这一阶段')+'</button></div>'+
+    out+'</div>';
+}
+/* 说书人为「我」时：底部给一个「交给 Agent 代主持」的入口 + 结束对局 */
+function agentEndRow(){
+  return '<div class="section"><h3>结束对局</h3>'+
+    '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
+    '<input id="winReason" placeholder="原因（可选）" style="flex:1">'+
+    '<button onclick="doEndGame()">宣布终局</button></div></div>';
+}
+function humanStoryPanel(seats,sel,roles,phase){
   var roleOpts = '<option value="">—</option>'+roles.map(function(r){ return '<option>'+r+'</option>'; }).join('');
   var phaseOpts = PHASES.map(function(p){ return opt(p,PHZH[p],phase); }).join('');
   return '<div class="story-panel"><b>说书人面板</b>（'+S.game.storyteller.name+'）'+
@@ -329,6 +391,29 @@ function storyPanel(seats,sel,roles,phase){
     '<textarea id="say" readonly placeholder="Agent 发言显示在这里"></textarea></div>' +
     roundSection();
 }
+/* 让 Agent 说书人主持当前阶段，并轮询结果 */
+async function runStory(){
+  if(!S.game) return;
+  try { await api('storyRound',{id:S.game.id}); }
+  catch(e){ S.startError = '说书人启动失败：'+((e&&e.message)||e); render(); return; }
+  S.story = {running:true,result:null,error:null};
+  render(); pollStory();
+}
+function pollStory(){
+  if(!S.game) return;
+  setTimeout(async function(){
+    try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){ S.story = {running:false,error:String((e&&e.message)||e)}; }
+    render();
+    if (S.story && S.story.running) pollStory(); else refresh();
+  }, 1500);
+}
+async function doEndGame(){
+  if(!S.game) return;
+  var side = ($('#winSide')||{}).value || 'good';
+  var reason = ($('#winReason')||{}).value || '';
+  try { await api('endGame',{id:S.game.id, side:side, reason:reason}); } catch(e){ S.startError=String((e&&e.message)||e); }
+  await refresh();
+}
 /* 模型面板：只放说书人自己的模型；各座位模型在「魔典」页点座位改。 */
 function modelPanel(){
   var g = S.game; if(!g) return '';
@@ -342,6 +427,7 @@ function modelPanel(){
 /* 轮次驱动器：一次唤醒全场存活 Agent，按座位顺序串行发言 */
 function roundSection(){
   if(!S.game) return '';
+  if(!iAmStoryteller(S.game)) return '';
   var st = S.round || {running:false,done:0,total:0,current:null,results:[]};
   var prog = st.total ? ('<div class="muted">进度 '+st.done+'/'+st.total+(st.current!=null?('，正在 '+(st.current+1)+' 号'):'')+'</div>') : '';
   var last = (st.results||[]).map(function(r){
@@ -373,6 +459,20 @@ function mySeatInGame(g){
   for(var i=0;i<g.seats.length;i++){ if(g.seats[i].type==='human') return i; }
   return 0;
 }
+/* 本局「我」是哪种身份：说书人 / 玩家 / 旁观，决定哪些操作可用 */
+function iAmStoryteller(g){ return !!(g && g.storyteller && g.storyteller.type === 'player'); }
+function iAmPlayer(g){
+  if(!g || !g.seats) return false;
+  for(var i=0;i<g.seats.length;i++){ if(g.seats[i].type === 'human') return true; }
+  return false;
+}
+function iAmSpectator(g){ return !!g && !iAmStoryteller(g) && !iAmPlayer(g); }
+/* 观战/历史回看：只读 */
+function canControl(){
+  if (!S.game) return true;
+  if (S.game.win && S.game.win.over) return false; // 终局后一切操作只读
+  return iAmStoryteller(S.game) || iAmPlayer(S.game);
+}
 /* 打开/创建对局后，把「你」的摆放同步成这一局里的真实身份 */
 function syncMeFromGame(g){
   if(!g) return;
@@ -386,6 +486,7 @@ function chatPanel(g){
   if(!g) return '<p class="muted">请先在「建局」中创建对局。</p>';
   var seats = g.seats||[];
   var self = mySeatInGame(g);
+  var roChat = !iAmStoryteller(g) && !iAmPlayer(g);
   var chOpts = opt('town','town（全员可见）',S.chatChannel)+opt('private','private（私聊）',S.chatChannel);
   var seatOpts = seats.map(function(s,i){ return '<label style="margin-right:8px"><input type="checkbox" class="chtarget" value="'+i+'" '+(S.chatTo.indexOf(i)>=0?'checked':'')+'>'+(i+1)+' 号 · '+s.name+'</label>'; }).join('');
   var msgs = (S.chatMsgs||[]).map(function(m){
@@ -398,7 +499,8 @@ function chatPanel(g){
     '<p class="muted">当前视角：'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+'。公开频道全员可见；私聊仅收发双方与说书人可见。</p>'+
     '<div class="row">频道：<select id="chatCh" onchange="S.chatChannel=this.value;render()">'+chOpts+'</select></div>'+
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
-    '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>'+
+    (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
+    '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
     '<div id="chatLog" class="log" style="max-height:360px">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
     '</div>';
 }
@@ -496,6 +598,12 @@ async function refresh(){
   S.game = await api('game',{id:S.game.id});
   if(!S.round || !S.round.running){
     try { S.round = await api('roundStatus',{id:S.game.id}); } catch(e){}
+  }
+  if (iAmPlayer(S.game)){
+    try { S.view = await api('view',{id:S.game.id, seat:mySeatInGame(S.game)}); } catch(e){}
+  } else { S.view = null; }
+  if (S.tab==='story' && !iAmStoryteller(S.game) && !(S.story && S.story.running)){
+    try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){}
   }
   render();
   if(S.tab==='wiki') loadWiki();
