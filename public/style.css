@@ -270,6 +270,7 @@ body.night .daytimer{}
 .bglayer{position:absolute;inset:-8%;background-size:cover;background-position:center center;background-repeat:no-repeat;
   opacity:0;transition:opacity 1.8s ease;filter:blur(var(--bg-blur,7.5px)) brightness(var(--bg-bright,1))}
 .bglayer.day{background-image:url('bg/day.png');opacity:1}
+.bglayer.night{background-image:url('bg/night.png');opacity:0}
 body.bgnight .bglayer.day{opacity:0}
 body.bgnight .bglayer.night{opacity:1}
 .bgscrim{position:absolute;inset:0;background:rgba(0,0,0,.16);pointer-events:none}

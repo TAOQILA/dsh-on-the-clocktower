@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.11.2';
+var VERSION = '0.11.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -326,16 +326,20 @@ function render(force){
   var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
   /* 主面板内容 */
   var sideInner = '<div class="drawerbody" data-keep="right">' + winBanner(g) + '<div class="tabs">'+tabsHtml+'</div>' + idCard + panel + '</div>';
-  /* 拉手位置：展开时贴在自己面板的左侧外面，收起时贴在屏幕边缘 */
+  /* 拉手位置：展开面板的拉手贴在自己面板左缘；未展开的拉手保持在屏幕最右侧，不跟着挤到面板左边 */
   var hChatRight, hChatTop = '50%', hDmRight, hDmTop = '50%';
-  if (dmOpen){
-    hDmRight = (chatOpen ? chatW + HAN : 0) + dmW;
-    hChatRight = chatOpen ? chatW : dmW;
-    if (!chatOpen) hChatTop = 'calc(50% - 92px)';
+  if (chatOpen && dmOpen) {
+    hChatRight = chatW;
+    hDmRight = chatW + HAN + dmW;
+  } else if (chatOpen) {
+    hChatRight = chatW;   /* 公聊展开：公聊拉手贴其左缘 */
+    hDmRight = 0;         /* 私聊未展开：留在屏幕最右侧 */
+  } else if (dmOpen) {
+    hDmRight = dmW;       /* 私聊展开：私聊拉手贴其左缘 */
+    hChatRight = 0;       /* 公聊未展开：留在屏幕最右侧 */
   } else {
-    hChatRight = chatOpen ? chatW : 0;
-    hDmRight = 0;
-    if (chatOpen) hDmTop = 'calc(50% - 92px)';
+    hChatRight = 0;
+    hDmRight = HAN;       /* 两个都收起：并排贴在屏幕最右侧 */
   }
   var dmRight = dmOpen ? (chatOpen ? chatW + HAN : 0) : 0;
   var dmRound = (chatOpen && dmOpen) ? ' roundright' : '';
@@ -819,8 +823,6 @@ function gamePanel(seats,sel){
 }
 function seatPanel(seats,sel){
   var ro = S.game && !canControl();
-  var speakPart = (S.game && !ro) ?
-    ('<div class="row"><button onclick="api(\'say\',{id:S.game.id,seat:'+S.selSeat+',text:document.getElementById(\'say\').value,channel:\'town\'}).then(refresh)">发言</button></div><textarea id="say" placeholder="以该座位发言..."></textarea>') : '';
   if (ro) return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
     '<p class="muted">旁观模式：只能查看，不能改名、换模型或替 Agent 发言。</p></div>';
   return '<div class="section"><h3>'+(S.selSeat+1)+' 号 · '+sel.name+'</h3>'+
@@ -828,7 +830,7 @@ function seatPanel(seats,sel){
     '</div>'+
     '<div class="row">名字：<input value="'+sel.name+'" onchange="renameSeat(S.selSeat,this.value)"></div>'+
     '<div class="row">模型：'+(sel.type==='human'?'<b>你</b>（无需模型）':modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)'))+'</div>'+
-    speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>'+ roundSection();
+    '</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>'+ roundSection();
 }
 function storyPanel(seats,sel,roles,phase){
   if (!S.game) return '<p class="muted">请先在「建局」中创建对局。</p>';

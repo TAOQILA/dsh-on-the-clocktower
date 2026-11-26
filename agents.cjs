@@ -232,7 +232,8 @@ const RULES = [
   '你只知道自己的角色和说书人私下告诉你的信息；不要编造自己没有的信息。',
   '不要提及「提示词」「模型」「AI」「机器人」等元信息，像普通玩家一样说话。',
   '指代任何一位玩家时必须写成「@名字」，例如「我觉得 @长庚 有问题」。不要只用座位号，也不要只写名字而不带 @。',
-  '称呼你自己时用「我」，不要 @ 自己，也不要用第三人称说自己。'
+  '称呼你自己时用「我」，不要 @ 自己，也不要用第三人称说自己。',
+  '说书人在夜里私聊询问你的问题（例如让你选择谁）必须如实回答，不能沉默、不能回避；这是你的角色义务。',
 ].join('\n');
 
 function renderMessages(msgs, seats) {
@@ -296,8 +297,8 @@ function buildPrompt(id, seat, replyTo, mode) {
   lines.push('');
   lines.push('【你这一轮要做什么】');
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
-    lines.push('有人刚刚私聊了你（见上方对话最后几条私聊）。请把回话直接写在 say 字段里，系统会私下转达给 ' + (Number(replyTo) + 1) + ' 号，不会公开。');
-    lines.push('say 必须非空：哪怕只是应付一句、反问一句、或者表明态度，也要回话，不要留空。whisper 留空数组即可。');
+    lines.push('说书人（或另一位玩家）刚刚私聊了你（见上方对话最后几条私聊），这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
+    lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
   } else if (mode === 'react') {
     lines.push('刚才场上有人公开发言（见上方对话最后几条）。');
     lines.push('先判断这条消息和你有没有关系：被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那必须接话。');
@@ -322,7 +323,7 @@ function buildStorytellerNightPrompt(id) {
   lines.push('重要：本程序中角色能力没有任何执行代码，全部由你依据游戏规则判断并落实。你决定夜里唤醒谁、他们看到什么、谁死亡、谁中毒或醉酒。');
   lines.push('你必须公正：不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
   lines.push('但公正不等于机械：你是这一局的天平。每一夜先称一次天平，判断善良方与邪恶方谁更弱，再用能力描述里留给你的裁量空间（「可能」「由你决定」「你可以选择」）去扶弱的一方。开局时邪恶方通常更弱。');
-  lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），你必须先私聊问 ta 想选谁，等 ta 回复后再结算；不能自己替他挑。');
+  lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），必须由你先主动私聊询问该玩家「你想选择谁」，等 ta 回复后再按 ta 的选择结算；你不能自己替他挑，也不能让玩家未经询问就自己报目标。');
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
   const stt = E.loadState(id);
@@ -360,6 +361,8 @@ function buildStorytellerNightPrompt(id) {
   lines.push(' "markers":[{"seat":座位号（1 起）,"marker":"中毒/醉酒/被保护"}],');
   lines.push(' "deaths":[座位号（1 起）],');
   lines.push(' "nextPhase":"day"}');
+  lines.push('公开说话（say 字段）的用词：夜里按顺序处理角色叫「唤醒」，不要说「递纸条」「发纸条」「送纸条」之类；例如「我现在唤醒占卜师」「我依次唤醒镇民」。');
+  lines.push('需要玩家自己选目标时，是「由你主动私聊询问、等回复后再结算」，绝不要写成「需要自己挑目标的角色请先私聊告诉我」这种让玩家主动报名的说法——主动权在你，不在玩家。');
   return { prompt: lines.join('\n'), view: v };
 }
 
@@ -523,9 +526,10 @@ async function applyOne(id, seat, out, opts, run){
     ? { think: '', say: '', whisper: [], error: out.error }
     : parseReply(out.text);
   if (parsed.think) E.think(id, seat, parsed.think);
-  const dmReplyTo = (opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1;
+  const dmReplyTo = (opts.replyTo === 'storyteller') ? 'storyteller' : ((opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1);
+  const isDm = (dmReplyTo === 'storyteller' || dmReplyTo >= 0);
   const nightNow = (st.phase === 'night');
-  if (dmReplyTo >= 0) {
+  if (isDm) {
     /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
     let back = dialectText(parsed);
     if (!back && !out.error) {
@@ -548,19 +552,19 @@ async function applyOne(id, seat, out, opts, run){
   } else if (parsed.say && String(parsed.say).trim()) {
     E.say(id, seat, String(parsed.say).trim(), 'town');
   }
-  (dmReplyTo >= 0 || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
+  (isDm || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
     /* 模型给的座位号是 1 起，落库用 0 起 */
     const to = (w.to || []).map(function (n) { return Number(n) - 1; })
       .filter(function (n) { return n >= 0 && n < st.seats.length && n !== seat; });
     if (to.length) E.say(id, seat, w.text, 'private', to);
   });
-  const dmBackFinal = (dmReplyTo >= 0) ? dialectText(parsed) : '';
+  const dmBackFinal = (isDm) ? dialectText(parsed) : '';
   run.results.push({
     seat: seat,
-    say: (dmReplyTo >= 0) ? dmBackFinal : parsed.say,
+    say: (isDm) ? dmBackFinal : parsed.say,
     whispers: (parsed.whisper || []).length,
     think: parsed.think,
-    error: out.error || ((dmReplyTo >= 0 && !dmBackFinal) ? '私聊没有产生回复' : null)
+    error: out.error || ((isDm && !dmBackFinal) ? '私聊没有产生回复' : null)
   });
 }
 
@@ -812,6 +816,18 @@ async function runStoryteller(id, opts) {
       if (parsed.think) E.think(id, 'storyteller', parsed.think);
       if (parsed.say) E.say(id, 'storyteller', parsed.say, 'town');
       parsed.info.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.giveInfo(id, i, x.text); applied.info++; } });
+      /* 说书人夜里私聊询问的问题，AI 必须回答：问句类的 info 落库后立刻驱动该座位私下回话 */
+      const askSeats = [];
+      parsed.info.forEach(function (x) {
+        const i = toIdx(x.seat);
+        const t = String(x.text || '');
+        if (i >= 0 && /[?？]|请告诉|你想选|选谁|选择谁|告诉我/.test(t)) askSeats.push(i);
+      });
+      if (askSeats.length) {
+        setTimeout(function () {
+          try { runRound(id, { seats: askSeats, replyTo: 'storyteller' }); } catch (e) { /* ignore */ }
+        }, 400);
+      }
       parsed.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
       parsed.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
       /* 白天：说书人自己判断何时发起 / 结算处决投票 */
