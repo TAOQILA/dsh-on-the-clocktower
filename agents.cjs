@@ -172,6 +172,14 @@ function viewFor(id, seat) {
     const said = (s.info[seat] || []).map(function (x) { return String(x.text || ''); }).join('\n');
     const m = said.match(/你的角色是[【\[]([^】\]]+)[】\]]/);
     if (m && m[1]) myRole = m[1].trim();
+    if (!myRole) {
+      const m2 = said.match(/你是(?:镇民|外来者|爪牙|恶魔|旅行者)?角色[:：]\s*([^。，,\s]+)/);
+      if (m2 && m2[1]) myRole = m2[1].trim();
+    }
+    if (!myRole) {
+      const m3 = said.match(/你的角色[:：]?\s*是?\s*[【\[]?([^【】\[\]。，,\s]+)[】\]]?/);
+      if (m3 && m3[1]) myRole = m3[1].trim();
+    }
   }
   const info = roleInfo(myRole);
   const msgs = E.messages(id, seat, false).slice(-MAX_MSGS_IN_PROMPT);
