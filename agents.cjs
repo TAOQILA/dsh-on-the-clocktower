@@ -704,7 +704,8 @@ async function runRound(id, opts) {
     /* 上一轮刚结束没多久又被触发时，只让被点到的人回应，避免连珠炮 */
     const lastAt = ROUND_LAST_AT.get(id) || 0;
     const extra = (Date.now() - lastAt < ROUND_COOLDOWN_MS) ? 0 : REACT_EXTRA_SPEAKERS;
-    const cap = Math.min(order.length, lead.length + extra);
+    /* 至少唤醒 1 位：即使没被 @，平台上的话也不会石沉大海、无人回应 */
+    const cap = Math.min(order.length, Math.max(1, lead.length + extra));
     pool = lead.concat(rest).slice(0, opts.limit > 0 ? Math.min(opts.limit, cap) : cap);
   } else {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
@@ -775,6 +776,7 @@ async function runStoryteller(id, opts) {
       };
       /* 说书人同理：只要有人在它思考期间插话，就带着新消息重想，直到一整轮无人插话 */
       let out = null, stRound = 0, stLastN = msgN();
+      const ST_MAX_ROUNDS = 2;
       for (;;) {
         stRound++;
         const cur = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
@@ -799,7 +801,10 @@ async function runStoryteller(id, opts) {
         }
         out = o;
         const nowSt = msgN();
-        if (nowSt <= stLastN) break;
+        /* 关键：本阶段的裁定（含 nextPhase=day）优先落地，不能被「思考期间有人插话」
+           无限推迟——否则夜里的询问与回答互相催生新消息，永远到不了白天。
+           最多重想 2 轮：新消息纳入判断后就定稿。 */
+        if (nowSt <= stLastN || stRound >= ST_MAX_ROUNDS) break;
         stLastN = nowSt;
       }
       if (!out) throw new Error('说书人没有返回结果');
