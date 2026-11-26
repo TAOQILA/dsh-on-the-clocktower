@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.12.0';
+var VERSION = '0.12.1';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1319,8 +1319,8 @@ function dmPanel(g){
   return '<div class="dmcol"><div class="dmhead"><b>私聊</b></div>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
       : (night
-        ? '<div class="dmwho">私聊对象：<div class="dmtargets">' + whoTargets + '</div></div>'
-        : '<div class="dmwho">私聊对象：<div class="dmtargets">' + who + '</div></div>'))
+        ? '<div class="dmwho"><div class="dmtargets">' + whoTargets + '</div></div>'
+        : '<div class="dmwho"><div class="dmtargets">' + who + '</div></div>'))
     + '<div id="dmLog" class="log chatlog dmLog">' + chatMsgsHtml(g, 'private') + '</div>'
     + (ro ? ''
       : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
