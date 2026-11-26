@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.7.8';
+var VERSION = '0.8.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,10 +20,12 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, lastPhase:'' };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, lastPhase:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
-var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',log:'日志',wiki:'知识库'};
+var TABS = {setup:'建局',ai:'AI 设置',game:'游戏',story:'说书人',log:'日志',wiki:'知识库'};
+/* 标签按两列三行排列：建局/AI 设置 → 游戏/说书人 → 日志/知识库 */
+var TAB_ROWS = [['setup','ai'],['game','story'],['log','wiki']];
 
 window.addEventListener('resize', function(){ if (typeof placeMe === 'function') placeMe(); });
 async function init(){
@@ -239,16 +241,21 @@ function render(force){
   var sel = seats[S.selSeat]||{};
   var roleNames = S.script?S.script.roles:[];
   var tabsHtml = '';
-  ['grimoire','setup','story','log','wiki'].forEach(function(t){
-    tabsHtml += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\''+t+'\')">'+TABS[t]+'</button>';
+  TAB_ROWS.forEach(function(row){
+    tabsHtml += '<div class="tabrow">';
+    row.forEach(function(t){
+      tabsHtml += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\''+t+'\')">'+TABS[t]+'</button>';
+    });
+    tabsHtml += '</div>';
   });
   var panel = '';
-  var idCard = myIdentityPanel();
+  var idCard = '';
   if (S.tab==='setup') panel = setupPanel();
+  else if (S.tab==='ai') panel = aiPanel(seats,sel);
   else if (S.tab==='story') panel = storyPanel(seats,sel,roleNames,cur);
   else if (S.tab==='log') panel = logPanel(g);
   else if (S.tab==='wiki') panel = wikiPanel();
-  else panel = seatPanel(seats,sel);
+  else panel = gamePanel(seats,sel);
   var hdr = g?('对局 '+g.id):'未开局';
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   $('#app').innerHTML =
@@ -364,10 +371,10 @@ function setupPanel(){
   if (S.game) {
     return '<div class="section"><h3>建局配置</h3>'+
       '<p class="muted">本局正在进行中（'+S.game.id+'），一局未结束前不能再建新局。</p>'+
-      '<div class="row"><button onclick="setTab(\'grimoire\')">回到魔典</button>'+
+      '<div class="row"><button onclick="setTab(\'game\')">回到游戏</button>'+
+      '<button onclick="setTab(\'ai\')">去 AI 设置改模型/昵称</button>'+
       '<button onclick="leaveGame()">离开本局，回到建局</button></div>'+
-      '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>'+
-      seatModelConfig(S.game.seats);
+      '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>';
   }
   var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+s.roles.length+'角色）',S.script.name); }).join('');
   var pills = S.seats.map(function(s,i){
@@ -382,12 +389,51 @@ function setupPanel(){
     (S.game
       ? '<p class="muted">本局已开始，「你」的位置已写入对局、不可再改；要换身份请新建一局。</p>'
       : '<p class="muted">按住「你」拖到目标位置松手即可（也可点一下拿起、再点目标位置）。</p>')+
-    ((meZone()!=='story')?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>'):'')+
+
+    '<p class="muted">先在这里定下剧本、人数、谁是「你」以及各座位的昵称；每个座位用哪个模型请到「AI 设置」页配置。</p>'+
     '<div class="row"><button id="startBtn" onclick="startGame()" '+(S.starting?'disabled':'')+'>'+(S.starting?'正在创建并进入第一夜...':'创建对局并进入第一夜')+'</button></div>'+
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
     '<p class="muted">默认每个人都是 AI。把「你」放到某个座位，你就成为那位玩家；放到说书人圆圈，你就当说书人；放到旁观席，你就只是看。其余座位都由 Agent 扮演。</p>'+
     '</div><div class="seatlist">'+pills+'</div>'+
-    seatModelConfig(S.seats);
+    nickPanel(S.seats);
+}
+/* 昵称配置：只在建局页，负责「这个座位叫什么」 */
+function nickPanel(seats){
+  if (!seats || !seats.length) return '';
+  var rows = seats.map(function(s,i){
+    var mine = S.game ? (s.type==='human') : (meZone()==='seat' && S.me.seat===i);
+    return '<div class="smrow"><span class="smno">'+(i+1)+'</span>'+
+      (mine ? '<span class="smname">'+esc(s.name||('座位'+(i+1)))+'</span><span class="muted">你（真人玩家）</span>'
+            : '<input class="smname-input" value="'+esc(s.name||('座位'+(i+1)))+'" onchange="renameSeat('+i+',this.value)">')+
+      '</div>';
+  }).join('');
+  return '<div class="section"><h3>座位昵称</h3>'+
+    '<div class="row"><button onclick="randomizeNames()">随机全局昵称</button>'+
+    '<span class="muted">从 data/names.json 的 '+nickPool().length+' 个昵称里随机分配。</span></div>'+
+    '<div class="smgrid">'+rows+'</div></div>';
+}
+/* AI 设置页：每个座位用什么模型 */
+function aiPanel(seats,sel){
+  var arr = S.game ? S.game.seats : S.seats;
+  var storyLine = '';
+  if (S.game) {
+    var st = S.game.storyteller || {};
+    storyLine = (st.type === 'agent')
+      ? ('<div class="row">说书人的模型：'+modelSelect('aiStSel', st.provider, st.model,
+          'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>')
+      : '<p class="muted">本局说书人是你（真人），不需要模型。</p>';
+  } else if (meZone() !== 'story') {
+    storyLine = '<div class="row">说书人的模型：'+modelSelect('aiStorySel', S.storyProvider, S.storyModel,
+      'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>';
+  } else {
+    storyLine = '<p class="muted">你打算当说书人，不需要给说书人配模型。</p>';
+  }
+  return '<div class="section"><h3>AI 设置</h3>'+
+    '<p class="muted">这里定义每个座位由哪个模型扮演。改动立刻生效，开局后也可以随时改。</p>'+
+    storyLine+
+    (S.game ? '' : '<div class="row"><button onclick="setTab(\'setup\')">← 回建局调整人数与昵称</button></div>')+
+    '</div>'+
+    seatModelConfig(arr);
 }
 /* 座位模型配置：开局前作用于 S.seats，开局后作用于对局内的 seats，随时可改 */
 function seatModelConfig(seats){
@@ -399,9 +445,7 @@ function seatModelConfig(seats){
       : modelSelect('smSel'+i, s.provider, s.model, 'var k=this.value;var q=splitKey(k);saveSeatModel('+i+',q.provider,q.model)');
     return '<div class="smrow"><span class="smno">'+(i+1)+'</span><span class="smname">'+esc(s.name||('座位'+(i+1)))+'</span>'+model+'</div>';
   }).join('');
-  return '<div class="section"><h3>座位模型配置</h3>'+
-    '<div class="row"><button onclick="randomizeNames()">随机全局昵称</button>'+
-    '<span class="muted">从 data/names.json 的 '+nickPool().length+' 个昵称里随机分配；也可在「魔典」页点某个座位单独改名。</span></div>'+
+  return '<div class="section"><h3>座位模型</h3>'+
     '<p class="muted">每个座位可单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型，改动立刻生效。</p>'+
     '<div class="smgrid">'+rows+'</div></div>';
 }
@@ -474,7 +518,7 @@ async function startGame(){
     }
     S.game = j.data;
     syncMeFromGame(S.game);
-    S.tab='story';
+    S.tab='game';
   } catch(e) {
     S.startError = (e && e.message) ? e.message : String(e);
   } finally {
@@ -499,10 +543,8 @@ function myIdentityPanel(){
     }).join('；');
     pins = '<div class="idline">私有信息：' + shown + '</div>';
   }
-  var quota = (typeof v.dmQuotaLeft === 'number') ? ('<span class="muted">今日私聊剩余 '+v.dmQuotaLeft+' 次</span>') : '';
   return '<div class="idcard me"><b>你是 '+(mySeatInGame(g)+1)+' 号 '+((g.seats[mySeatInGame(g)]||{}).name||'')+'</b>'+
-    '<div class="idline">角色：<b>'+role+'</b>'+fac+' '+(v.alive===false?'（已出局）':'')+'</div>'+ab+pins+
-    '<div class="idline">'+quota+'</div></div>';
+    '<div class="idline">角色：<b>'+role+'</b>'+fac+' '+(v.alive===false?'（已出局，仍可发言）':'')+'</div>'+ab+pins+'</div>';
 }
 /* 终局横幅 */
 function winBanner(g){
@@ -511,6 +553,28 @@ function winBanner(g){
   return '<div class="winbanner '+(good?'good':'evil')+'">'+
     '<div class="wintitle">'+(good?'善良阵营胜利':'邪恶阵营胜利')+'</div>'+
     '<div class="muted">'+(g.win.reason||'')+'</div></div>';
+}
+/* 游戏页：你是谁、说书人对你说了什么、以及当前选中座位的详情 */
+function gamePanel(seats,sel){
+  return myIdentityPanel() + inboxPanel() + seatPanel(seats,sel);
+}
+/* 说书人发给「你」的消息（只显示你自己的，不泄露别人） */
+function inboxPanel(){
+  var g = S.game; if(!g) return '';
+  var v = S.view;
+  if (!v) return '';
+  var items = v.privateInfo || [];
+  if (!items.length) {
+    return '<div class="section"><h3>说书人的消息</h3><p class="muted">说书人还没有单独给你发过信息。</p></div>';
+  }
+  var secs = v.secretInfo || [];
+  var html = items.map(function(t){
+    var s2 = String(t);
+    var secret = secs.indexOf(s2) >= 0;
+    return '<div class="inboxitem'+(secret?' secret':'')+'">'+esc(s2)+
+      (secret ? '<span class="muted">　（本夜刚得到，天亮后才能公开讨论）</span>' : '')+'</div>';
+  }).join('');
+  return '<div class="section"><h3>说书人的消息</h3>'+html+'</div>';
 }
 function seatPanel(seats,sel){
   var ro = S.game && !canControl();
@@ -799,7 +863,7 @@ async function openGame(id){
   try {
     var g = await api('game',{id:id, storyteller:false});
     if(!g) throw new Error('没有这一局');
-    S.game = g; S.selSeat = 0; S.tab = 'grimoire'; S.round = null;
+    S.game = g; S.selSeat = 0; S.tab = 'game'; S.round = null;
     syncMeFromGame(g);
     render();
   } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }

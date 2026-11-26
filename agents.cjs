@@ -27,7 +27,8 @@ const E = require('./engine.cjs');
 
 const ROOT = __dirname;
 const MAX_MSGS_IN_PROMPT = 40;
-const MAX_DM_PER_DAY = 2;
+/* 私聊不再限制次数：上限只是防模型一次刷屏的兜底 */
+const MAX_DM_PER_DAY = 99;
 const CALL_TIMEOUT_MS = 90000;
 const FENCE = String.fromCharCode(96, 96, 96);
 
@@ -280,9 +281,9 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('只有在确实无话可说时才沉默：say 写空字符串 ""。沉默太多会让场上没人讨论，对好人不利。');
     lines.push('不要复述别人刚说过的话；一句话就够，不要长篇大论。');
     if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
-    else lines.push('必要时最多私聊 ' + v.dmQuotaLeft + ' 人（whisper）。');
+    else lines.push('想单独问谁就私聊谁（whisper），不限次数；但别刷屏，一两句说清楚。');
   } else {
-    lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
+    lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），想单独问谁就私聊谁（whisper），不限次数。');
   }
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}]}');

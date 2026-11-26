@@ -143,3 +143,9 @@ body.night .chatcol{background:radial-gradient(circle at 50% 40%,var(--panel-a),
 .chatnote{font-size:11px;text-align:center;margin:4px 0 0}
 .deadnote{color:#b07c7c;font-weight:700}
 body.night .deadnote{color:#c98f8f}
+.tabrow{display:flex;gap:8px;margin-bottom:8px}
+.tabrow button{flex:1}
+.inboxitem{font-size:13px;line-height:1.7;padding:6px 8px;border-left:3px solid var(--gold);background:#1b1610;border-radius:4px;margin-bottom:6px}
+.inboxitem.secret{border-left-color:#b07c7c}
+body.night .inboxitem{background:#12102a}
+.smname-input{flex:1;min-width:120px;font-size:12px;padding:3px 6px}

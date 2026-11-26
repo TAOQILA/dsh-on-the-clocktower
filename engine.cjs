@@ -61,9 +61,10 @@ function saveState(id, s){
   fs.writeFileSync(path.join(gameDir(id),'state','current.json'), JSON.stringify(s,null,2),'utf8');
   fs.writeFileSync(path.join(gameDir(id),'state','turn-'+String(s.turn).padStart(4,'0')+'.json'), JSON.stringify(s,null,2),'utf8');
 }
-function log(id, who, text){
+/* priv=true 的日志只有说书人视角可见（分配角色、改模型这类会暴露身份的操作） */
+function log(id, who, text, priv){
   const s = loadState(id);
-  s.log.push({ t:new Date().toISOString(), who, text });
+  s.log.push({ t:new Date().toISOString(), who, text, priv: !!priv });
   appendJsonl(path.join(gameDir(id),'transcript-entries.jsonl'), {who,text});
   saveState(id, s);
 }
@@ -102,7 +103,7 @@ function assignRole(id, seat, role){
   const s = loadState(id);
   s.roles[seat]=role;
   saveState(id,s);
-  log(id,'说书人','为 '+s.seats[seat].name+' 分配角色：'+role);
+  log(id,'说书人','为 '+s.seats[seat].name+' 分配角色：'+role, true);
   return {ok:true};
 }
 function giveInfo(id, seat, text){
@@ -262,7 +263,7 @@ function setSeatModel(id, seat, provider, model, name){
   if (typeof name === 'string' && name.trim()) target.name = name.trim();
   saveState(id, s);
   const who = (seat === 'storyteller' || seat === 'story') ? '说书人' : s.seats[seat].name;
-  log(id, '系统', who + ' 的模型已设为 ' + (target.provider&&target.model ? (target.provider+'/'+target.model) : '默认') );
+  log(id, '系统', who + ' 的模型已设为 ' + (target.provider&&target.model ? (target.provider+'/'+target.model) : '默认'), true);
   return {ok:true, seat, provider:target.provider, model:target.model};
 }
 
