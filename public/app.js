@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.9';
+var VERSION = '0.7.1';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0 };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[] };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -28,6 +28,7 @@ var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私�
 window.addEventListener('resize', function(){ if (typeof placeMe === 'function') placeMe(); });
 async function init(){
   try { S.models = await api('models'); } catch(e){ S.models = {providers:[],error:String(e&&e.message||e)}; }
+  try { var np = await api('names'); S.namesPool = Array.isArray(np) ? np : []; } catch(e2){ S.namesPool = []; }
   S.scripts = await api('scripts');
   if (!S.scripts.length){ $('#app').innerHTML='<p style="padding:30px">未找到剧本 JSON，请检查 data/scripts/</p>'; return; }
   S.script = S.scripts[0];
@@ -35,6 +36,56 @@ async function init(){
   render();
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); if(t==='log'&&S.history===null) loadHistory(); }
+/* 调整人数：只增删尾部座位，已有座位的名字与模型原样保留 */
+function resizeSeats(n){
+  n = Math.max(5, Math.min(30, n|0));
+  var cur = S.seats || [], next = [];
+  for (var i=0;i<n;i++){
+    if (cur[i]) { next.push(cur[i]); continue; }
+    var p = null, pairs = modelPairs();
+    if (pairs.length) p = pairs[i % pairs.length];
+    var nm = pickNicks(1)[0] || ('玩家'+(i+1));
+    var used = {}; next.forEach(function(x){ used[x.name] = 1; });
+    var base = nm, k = 2;
+    while (used[nm]) { nm = base + ' ' + (k++); }
+    next.push({seat:i, name:nm, type:'agent', provider:p?p.provider:'', model:p?p.model:''});
+  }
+  for (var j=0;j<next.length;j++) next[j].seat = j;
+  S.seats = next;
+  if (S.me.zone==='seat' && S.me.seat >= n) { S.me.zone = 'spectator'; S.me.seat = 0; }
+  return next;
+}
+/* 随机昵称：从 data/names.json 的候选池里不放回抽取，抽完则追加序号 */
+function nickPool(){
+  var p = S.namesPool || [];
+  return p.filter(function(x){ return String(x||'').trim(); }).map(function(x){ return String(x).trim(); });
+}
+function pickNicks(n){
+  var pool = nickPool().slice(), out = [];
+  if (!pool.length) { for (var q=0;q<n;q++) out.push('玩家'+(q+1)); return out; }
+  for (var i=0;i<n;i++){
+    if (!pool.length) { out.push(out[i-1]+'·2'); continue; }
+    var k = Math.floor(Math.random()*pool.length);
+    out.push(pool.splice(k,1)[0]);
+  }
+  var seen = {}, dup = 1;
+  return out.map(function(nm){ if (seen[nm]) { dup++; return nm+' '+(dup); } seen[nm]=1; return nm; });
+}
+/* 随机全局昵称：开局前改内存，开局后逐座位写回对局 */
+async function randomizeNames(){
+  var arr = S.game ? S.game.seats : S.seats;
+  if (!arr || !arr.length) return;
+  var picks = pickNicks(arr.length);
+  for (var i=0;i<arr.length;i++) arr[i].name = picks[i];
+  render();
+  if (!S.game) return;
+  for (var j=0;j<arr.length;j++){
+    var cur = arr[j] || {};
+    try { await api('seatModel',{id:S.game.id,seat:j,provider:cur.provider||'',model:cur.model||'',name:cur.name}); } catch(e){}
+  }
+  try { S.game = await api('game',gameReq()); } catch(e){}
+  render();
+}
 function defaultSeats(n){
   var pairs = modelPairs(), a = [], used = {};
   for (var i=0;i<n;i++){
@@ -282,9 +333,9 @@ function setupPanel(){
     return '<span class="pill '+(mine?'on':'')+'" onclick="dropMe(\'seat\','+i+')">'+(mine?'你 · ':'')+(i+1)+' 号 · '+s.name+'</span>';
   }).join('');
   return '<div class="section"><h3>建局配置</h3>'+
-    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);S.seats=defaultSeats(S.seats.length);render()">'+scripts+'</select></div>'+
-    '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px">'+
-    '<button onclick="S.seats=defaultSeats(Math.max(5,Math.min(30,+document.getElementById(\'seatCount\').value)));render()">应用人数</button></div>'+
+    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);render()">'+scripts+'</select></div>'+
+    '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px" title="减少人数只删除编号最大的座位">'+
+    '<button onclick="resizeSeats(+document.getElementById(\'seatCount\').value);render()">应用人数</button></div>'+
     '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
     (S.game
       ? '<p class="muted">本局已开始，「你」的位置已写入对局、不可再改；要换身份请新建一局。</p>'
@@ -307,7 +358,9 @@ function seatModelConfig(seats){
     return '<div class="smrow"><span class="smno">'+(i+1)+'</span><span class="smname">'+esc(s.name||('座位'+(i+1)))+'</span>'+model+'</div>';
   }).join('');
   return '<div class="section"><h3>座位模型配置</h3>'+
-    '<p class="muted">每个座位可单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型，改动立刻生效。改名请在「魔典」页点该座位。</p>'+
+    '<div class="row"><button onclick="randomizeNames()">随机全局昵称</button>'+
+    '<span class="muted">从 data/names.json 的 '+nickPool().length+' 个昵称里随机分配；也可在「魔典」页点某个座位单独改名。</span></div>'+
+    '<p class="muted">每个座位可单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型，改动立刻生效。</p>'+
     '<div class="smgrid">'+rows+'</div></div>';
 }
 function toggleSeat(i){ dropMe('seat', i); }

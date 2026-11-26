@@ -38,6 +38,11 @@ function buildApi(opts){
     const d = path.join(ROOT,'data','scripts');
     return fs.readdirSync(d).filter(f=>f.endsWith('.json')).map(f=>JSON.parse(fs.readFileSync(path.join(d,f),'utf8')));
   },
+  names: () => {
+    const f = path.join(ROOT,'data','names.json');
+    try { const j = JSON.parse(fs.readFileSync(f,'utf8')); return Array.isArray(j) ? j : (Array.isArray(j.names) ? j.names : []); }
+    catch(e) { return []; }
+  },
   wiki: (q) => {
     const name = String(q.name||'').replace(/[\\/:*?"<>|]/g,'_');
     const f = path.join(ROOT,'data','wiki','pages', name + '.md');
