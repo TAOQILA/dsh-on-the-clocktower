@@ -45,6 +45,15 @@ const OWN_CLIP = 4000;       /* 玩家自己角色页最多注入字符数 */
 const ROLE_DETAIL_CLIP = 850;/* 说书人：每个角色细则最多注入字符数 */
 const SYSTEM_CLIP = 40000;   /* 玩家 system 最多字符数 */
 const ST_SYSTEM_CLIP = 72000;/* 说书人 system 最多字符数（覆盖全部角色细则，实测约 68k） */
+/* 阅读规则（与 data/wiki/INDEX.md 顶部一致）——所有 Agent 开局必读顺序 */
+const READING_RULES = [
+  '【阅读规则·开局必读】按下列顺序学习本局知识，条目用 wiki_lookup(页面名) 查看，文件名即页面名：',
+  '1. 先读与你身份对应的规则底线（下文「规则要点」已直接给出，无需再查）。',
+  '2. 再读本局剧本页（下文「本剧本」已给出全文）。',
+  '3. 最后读本剧本涉及的全部角色页——不分是否上场，必须全部读完，用于理解技能交互与伪装。',
+  '4. 只读与本对局有关的内容，不必通读全库；本局剧本之外的角色与剧本页可以不读。',
+  '5. 不要向任何人透露你读过哪些资料，直接以角色身份参与游戏。'
+].join('\n');
 function rulesText(names){
   return names.map(function(n){
     const t = wikiLookup(n);
@@ -112,7 +121,7 @@ function playerSystem(id, seat){
   const role = s.roles[seat];
   const ri = roleInfo(role);
   const own = ri ? clip(wikiLookup(ri.name), OWN_CLIP) : '';
-  return clip(RULES + '\n\n【本局知识】\n规则要点：\n' + kb.playerRuleText
+  return clip(RULES + '\n\n' + READING_RULES + '\n\n【本局知识】\n规则要点：\n' + kb.playerRuleText
     + '\n\n本剧本：' + (s.script||'')
     + (kb.scriptText ? ('\n' + kb.scriptText) : '')
     + '\n\n本剧本全部角色能力（务必全部读完，不只是你自己）：\n' + kb.roleBrief
@@ -122,7 +131,7 @@ function playerSystem(id, seat){
 }
 function storytellerSystem(id){
   const kb = gameKnowledge(id);
-  return clip(RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
+  return clip(RULES + '\n\n' + READING_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
     + '\n\n本剧本：' + (kb.scriptText||'')
     + '\n\n本剧本全部角色能力原文：\n' + kb.roleDetail, ST_SYSTEM_CLIP);
 }
