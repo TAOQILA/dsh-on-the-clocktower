@@ -178,6 +178,9 @@ function viewFor(id, seat) {
     alive: !!s.alive[seat],
     aliveList: aliveList, deadList: deadList,
     privateInfo: (s.info[seat] || []).map(function (x) { return x.text; }),
+    /* 本夜刚拿到、还不能公开讨论的信息 */
+    secretInfo: (s.info[seat] || []).filter(function (x) { return !E.infoRevealable(x, s); }).map(function (x) { return String(x.text||''); }),
+    canReveal: (s.info[seat] || []).every(function (x) { return E.infoRevealable(x, s); }),
     nominations: s.nominations.slice(-6),
     votes: s.votes,
     messages: msgs,
@@ -246,7 +249,19 @@ function buildPrompt(id, seat, replyTo, mode) {
   lines.push('');
   if (v.privateInfo.length) {
     lines.push('【说书人私下告诉你的信息】');
-    v.privateInfo.forEach(function (t) { lines.push('- ' + t); });
+    v.privateInfo.forEach(function (t) {
+      const secret = (v.secretInfo || []).indexOf(String(t)) >= 0;
+      lines.push('- ' + t + (secret ? '　← 【本夜刚得知，天亮了才能说】' : ''));
+    });
+    lines.push('');
+  }
+  if ((v.secretInfo || []).length) {
+    lines.push('');
+    lines.push('【保密规则 · 必须遵守】');
+    lines.push('你今夜刚拿到的信息，在进入下一个白天之前绝对不能说出来、也不能暗示。');
+    lines.push('夜里你可以照常聊天、试探、怀疑别人、为自己辩护，但只能用白天已有的信息。');
+    lines.push('一旦天亮（阶段变成 day），这些信息就可以公开讨论了。');
+    lines.push('违反这条会毁掉整局游戏。');
     lines.push('');
   }
   lines.push('【你能看到的对话】');
@@ -256,12 +271,12 @@ function buildPrompt(id, seat, replyTo, mode) {
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
     lines.push('有人刚刚私聊了你（见上方对话里的对话）。请用 whisper 私下回复 ' + (Number(replyTo) + 1) + ' 号，不要公开发言（say 留空）。');
   } else if (mode === 'react') {
-    lines.push('刚才场上有人公开发言（见上方对话最后几条）。你要自己判断要不要接话。');
-    lines.push('- 想接话：在 say 里写一句公开发言（可以质疑、附议、辩护、给信息、拉票）。');
-    lines.push('- 不想接话：say 留空字符串 ""，这一轮就不出现在公屏上。不必每轮都说话，沉默也是策略。');
-    lines.push('不要复述别人刚说过的话；不要为了说话而说话。');
-    if (v.phase === 'night') lines.push('现在是夜晚，只能公开发言，不能私聊。');
-    else lines.push('必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
+    lines.push('刚才场上有人公开发言（见上方对话最后几条）。');
+    lines.push('默认应该接一句：表明态度、提出怀疑、附议别人、给出你的信息，或为自己辩护。');
+    lines.push('只有在确实无话可说时才沉默：say 写空字符串 ""。沉默太多会让场上没人讨论，对好人不利。');
+    lines.push('不要复述别人刚说过的话；一句话就够，不要长篇大论。');
+    if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
+    else lines.push('必要时最多私聊 ' + v.dmQuotaLeft + ' 人（whisper）。');
   } else {
     lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
   }
@@ -439,7 +454,7 @@ const STORY_RUNNING = new Map();
 function status(id) {
   const r = RUNNING.get(id);
   if (!r) return { running: false, done: 0, total: 0, current: null, results: [] };
-  return { running: r.running, done: r.done, total: r.total, current: r.current, results: r.results, error: r.error || null };
+  return { running: r.running, done: r.done, total: r.total, current: r.current, waiting: r.waiting || [], results: r.results, error: r.error || null };
 }
 function storyStatus(id) {
   const r = STORY_RUNNING.get(id);
@@ -466,22 +481,37 @@ async function runRound(id, opts) {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
   }
 
-  const run = { running: true, done: 0, total: pool.length, current: null, results: [], error: null };
+  const run = { running: true, done: 0, total: pool.length, current: null, waiting: pool.slice(), results: [], error: null };
   RUNNING.set(id, run);
 
   (async function () {
     try {
-      for (const seat of pool) {
-        run.current = seat;
-        const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
-        const route = routeFor(id, seat);
-        const out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
+      /* 所有 Agent 同时思考：模型调用是最慢的一段，串行会让最后一位等很久。
+         落库仍然按座位顺序串行 —— Engine 的状态是 loadState/saveState，并发写会互相覆盖。 */
+      const outs = await Promise.all(pool.map(function (seat) {
+        return (async function () {
+          try {
+            const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
+            const route = routeFor(id, seat);
+            const out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
+            return { seat: seat, out: out };
+          } catch (err) {
+            return { seat: seat, out: { error: String((err && err.message) || err) } };
+          } finally {
+            run.done++;
+            run.waiting = run.waiting.filter(function (n) { return n !== seat; });
+          }
+        })();
+      }));
+
+      for (const item of outs) {
+        const seat = item.seat, out = item.out;
         const parsed = out.error
-          ? { think: '', say: '（本轮该 Agent 调用失败：' + out.error + '）', whisper: [] }
+          ? { think: '', say: '', whisper: [], error: out.error }
           : parseReply(out.text);
         if (parsed.think) E.think(id, seat, parsed.think);
         const dmReplyTo = (opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1;
-        const whispered = (parsed.whisper || []).length > 0;
+        const nightNow = (E.loadState(id).phase === 'night');
         if (dmReplyTo >= 0) {
           /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
           const firstWhisper = (parsed.whisper && parsed.whisper.length) ? String(parsed.whisper[0].text || '') : '';
@@ -490,7 +520,6 @@ async function runRound(id, opts) {
         } else if (parsed.say && String(parsed.say).trim()) {
           E.say(id, seat, String(parsed.say).trim(), 'town');
         }
-        const nightNow = (E.loadState(id).phase === 'night');
         (dmReplyTo >= 0 || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
           /* 模型给的座位号是 1 起，落库用 0 起 */
           const to = (w.to || []).map(function (n) { return Number(n) - 1; })
@@ -498,14 +527,14 @@ async function runRound(id, opts) {
           if (to.length) E.say(id, seat, w.text, 'private', to);
         });
         run.results.push({ seat: seat, say: parsed.say, whispers: (parsed.whisper || []).length, think: parsed.think, error: out.error || null });
-        run.done++;
       }
-      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位）');
+      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位同时思考）');
     } catch (err) {
       run.error = String((err && err.message) || err);
     } finally {
       run.running = false;
       run.current = null;
+      run.waiting = [];
     }
   })();
 

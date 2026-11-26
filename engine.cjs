@@ -107,13 +107,22 @@ function assignRole(id, seat, role){
 }
 function giveInfo(id, seat, text){
   const s = loadState(id);
-  (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text});
+  /* night/day 记录发放时刻：夜里得到的信息，要到下一个白天才能公开讨论 */
+  (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text, night:s.night, day:s.day, phase:s.phase});
   /* 若信息里写明「你的角色是【X】」，顺手把角色落到 roles，保证身份面板/胜负判定/夜间顺序一致 */
   const m = String(text||'').match(/你的角色是[【\[]([^】\]]+)[】\]]/);
   if (m && m[1] && !s.roles[seat]) { s.roles[seat] = m[1].trim(); }
   agentLog(id,seat,'actions',{kind:'info_received',text});
   saveState(id,s);
   return {ok:true};
+}
+/* 一条私有信息是否已经可以公开讨论：夜里拿到的，要等进入下一个白天（day 前进）才行 */
+function infoRevealable(entry, s){
+  if (!entry) return false;
+  if (entry.phase !== 'night') return true;          /* 白天给的，当场就能说 */
+  const givenNight = Number(entry.night || 0);
+  if (s.phase === 'night') return false;              /* 还是夜里，同夜信息一律不许说 */
+  return Number(s.day || 0) >= givenNight && Number(s.day||0) > 0;
 }
 function speak(id, seat, text){
   const s = loadState(id);
@@ -272,6 +281,6 @@ function createAndStart(cfg){
   return loadState(s.id);
 }
 
-module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase,
+module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction };
