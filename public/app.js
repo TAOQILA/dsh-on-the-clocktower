@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.11.9';
+var VERSION = '0.12.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1312,16 +1312,18 @@ function dmPanel(g){
   if (selfIdx !== -1){
     who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
   }
-  var whoTargets = night ? (selfIdx !== -1 ? '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>' : '') : who;
-  var nightTip = (night && !ro) ? '<span class="dmnighttip">夜晚禁止玩家间私聊，只可与说书人私聊。</span>' : '';
-  return '<div class="dmcol"><div class="dmhead"><b>私聊</b>' + nightTip + '</div>'
+  var whoTargets = who; /* 夜晚也显示全部玩家标签，只是切到非说书人时不能发送 */
+  var nightBlocked = night && (S.dmTo || []).some(function(x){ return x !== 'storyteller'; });
+  var dmPlaceholder = nightBlocked ? '夜晚禁止玩家间私聊，只可与说书人私聊。' : '悄悄话…（输入 @ 可以直接 @人）';
+  var dmDis = nightBlocked ? ' disabled' : '';
+  return '<div class="dmcol"><div class="dmhead"><b>私聊</b></div>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
       : (night
         ? '<div class="dmwho">私聊对象：<div class="dmtargets">' + whoTargets + '</div></div>'
         : '<div class="dmwho">私聊对象：<div class="dmtargets">' + who + '</div></div>'))
     + '<div id="dmLog" class="log chatlog dmLog">' + chatMsgsHtml(g, 'private') + '</div>'
     + (ro ? ''
-      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="悄悄话…（输入 @ 可以直接 @人）" value="' + esc(S.dmDraft || '') + '" oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()">发送</button></div>')
+      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
     + '<div id="mentionPop-dm" class="mentionpop"></div>'
     + '</div>';
 }
@@ -1374,6 +1376,7 @@ async function sendDm(){
   var seat = iAmStoryteller(S.game) ? 'storyteller' : mySeatInGame(S.game);
   var to = (S.dmTo || []).slice();
   if (!to.length){ S.startError = '请先选择私聊对象'; render(true); return; }
+  if (S.game && S.game.phase === 'night' && to.some(function(x){ return x !== 'storyteller'; })){ S.startError = '夜晚禁止玩家间私聊，只可与说书人私聊。'; render(true); return; }
   try {
     var r = await api('say', { id: S.game.id, seat: seat, text: txt, channel: 'private', to: to });
     if (r && r.ok === false) { S.startError = r.error || '发送失败'; render(true); return; }
