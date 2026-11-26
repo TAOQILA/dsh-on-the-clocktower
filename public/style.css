@@ -54,9 +54,9 @@ button:hover{background:var(--accent)}button:disabled{opacity:.4;cursor:not-allo
 input,select{background:#221d18;color:var(--parch);border:1px solid #6b5a3e;border-radius:5px;padding:7px 10px;font-family:inherit}
 .layout{display:grid;grid-template-columns:minmax(440px,560px) minmax(240px,1fr) minmax(420px,560px);gap:14px;padding:14px;height:calc(100vh - 52px)}
 .layout.nochat{grid-template-columns:minmax(440px,560px) minmax(240px,1fr) 66px}
-.layout.noside{grid-template-columns:minmax(320px,480px) minmax(0,1fr) 30px}
-.layout.noside .right{display:none}
-.layout.nochat.noside{grid-template-columns:64px minmax(0,1fr) 30px}
+.layout.noside{grid-template-columns:minmax(440px,560px) minmax(0,1fr) 40px}
+.layout.noside .right{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:8px 2px;overflow:hidden}
+.layout.nochat.noside{grid-template-columns:66px minmax(0,1fr) 40px}
 .left,.right{border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,rgba(36,28,22,var(--panel-alpha)),rgba(20,17,14,var(--panel-alpha)));backdrop-filter:blur(2px)}
 .left{position:relative;min-height:0;display:grid;place-items:center;padding:14px;overflow:hidden;container-type:size}.right{overflow-y:auto;padding:16px}
 .table{position:relative;aspect-ratio:1 / 1;min-height:0;margin:0;justify-self:center;align-self:center;
@@ -196,7 +196,7 @@ body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 .chatinner{display:flex;flex-direction:column;min-height:0;flex:1}
 .sidefold{align-self:flex-end;margin-bottom:6px;font-size:12px;padding:3px 9px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
 .sidefold:hover{color:var(--gold);border-color:var(--gold)}
-.sideexpand{width:26px;align-self:stretch;font-size:12px;line-height:1.4;padding:8px 2px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer;grid-column:3}
+.sideexpand{width:100%;flex:1 1 auto;font-size:12px;line-height:1.3;padding:10px 2px;border-radius:8px;background:rgba(0,0,0,.34);border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer;writing-mode:vertical-rl;letter-spacing:2px}
 .sideexpand:hover{color:var(--gold);border-color:var(--gold)}
 .chatbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .dmopen{font-size:12px;font-weight:900;padding:4px 12px;border-radius:14px;background:linear-gradient(160deg,#7a68d8,#4b3a8f);border:1px solid #b7a9ff;color:#fff;cursor:pointer}
