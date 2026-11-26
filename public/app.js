@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.7.3';
+var VERSION = '0.7.4';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
-var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
+var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',log:'日志',wiki:'知识库'};
 
 window.addEventListener('resize', function(){ if (typeof placeMe === 'function') placeMe(); });
 async function init(){
@@ -35,7 +35,7 @@ async function init(){
   S.seats = defaultSeats(7);
   render();
 }
-function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='chat'&&S.game) loadChat(); if(t==='log'&&S.history===null) loadHistory(); }
+function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); }
 /* 调整人数：只增删尾部座位，已有座位的名字与模型原样保留 */
 function resizeSeats(n){
   n = Math.max(5, Math.min(30, n|0));
@@ -202,14 +202,13 @@ function render(force){
   var sel = seats[S.selSeat]||{};
   var roleNames = S.script?S.script.roles:[];
   var tabsHtml = '';
-  ['grimoire','setup','story','chat','log','wiki'].forEach(function(t){
+  ['grimoire','setup','story','log','wiki'].forEach(function(t){
     tabsHtml += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\''+t+'\')">'+TABS[t]+'</button>';
   });
   var panel = '';
   var idCard = myIdentityPanel();
   if (S.tab==='setup') panel = setupPanel();
   else if (S.tab==='story') panel = storyPanel(seats,sel,roleNames,cur);
-  else if (S.tab==='chat') panel = chatPanel(g);
   else if (S.tab==='log') panel = logPanel(g);
   else if (S.tab==='wiki') panel = wikiPanel();
   else panel = seatPanel(seats,sel);
@@ -217,7 +216,7 @@ function render(force){
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   $('#app').innerHTML =
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
-    '<div class="layout"><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
+    '<div class="layout"><div class="chatcol">'+ chatPanel(g) +'</div><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
     '</div></div><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div></div>';
   drawTable(seats,g);
@@ -628,8 +627,29 @@ function syncMeFromGame(g){
   }
   S.me = { zone:'spectator', seat:0 };
 }
+/* 只重画聊天记录：输入时也能看到新消息，不销毁输入框 */
+function chatMsgsHtml(g){
+  if(!g) return '<div class="muted">暂无消息</div>';
+  var seats = g.seats||[];
+  var h = (S.chatMsgs||[]).map(function(m){
+    var from = seats[m.from]?seats[m.from].name:((m.from+1)+' 号');
+    var cls = m.channel==='private'?'dm':'town';
+    var tag = m.channel==='private'?'私聊':'';
+    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+'：'+esc(m.text)+'</div>';
+  }).join('');
+  return h || '<div class="muted">暂无消息</div>';
+}
+function paintChat(){
+  var cl = document.getElementById('chatLog');
+  if(!cl) return;
+  var g = S.game;
+  var nearBottom = (cl.scrollHeight - cl.scrollTop - cl.clientHeight) < 28;
+  cl.setAttribute('data-count', String((S.chatMsgs||[]).length));
+  cl.innerHTML = chatMsgsHtml(g);
+  if (nearBottom) { cl.scrollTop = cl.scrollHeight; S.chatSeen = (S.chatMsgs||[]).length; }
+}
 function chatPanel(g){
-  if(!g) return '<p class="muted">请先在「建局」中创建对局。</p>';
+  if(!g) return '<div class="chatempty muted">先在「建局」创建对局，这里会显示群聊。</div>';
   var seats = g.seats||[];
   var self = mySeatInGame(g);
   var roChat = !iAmStoryteller(g) && !iAmPlayer(g);
@@ -637,19 +657,14 @@ function chatPanel(g){
   if (isNight && S.chatChannel === 'private') S.chatChannel = 'town';
   var chOpts = opt('town','town（全员可见）',S.chatChannel)+(isNight?'':opt('private','private（私聊）',S.chatChannel));
   var seatOpts = seats.map(function(s,i){ return '<label style="margin-right:8px"><input type="checkbox" class="chtarget" value="'+i+'" '+(S.chatTo.indexOf(i)>=0?'checked':'')+'>'+(i+1)+' 号 · '+s.name+'</label>'; }).join('');
-  var msgs = (S.chatMsgs||[]).map(function(m){
-    var from = seats[m.from]?seats[m.from].name:((m.from+1)+' 号');
-    var cls = m.channel==='private'?'dm':'town';
-    var tag = m.channel==='private'?'私聊':'';
-    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+'：'+m.text+'</div>';
-  }).join('');
-  return '<div class="section"><h3>群聊 / 私聊</h3>'+
-    '<p class="muted">当前视角：'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+'。公开频道全员可见；私聊仅收发双方与说书人可见。</p>'+
+  var msgs = chatMsgsHtml(g);
+  return '<div class="chatwrap"><h3>群聊 / 私聊</h3>'+
+    '<p class="chatwho muted">'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+'</p>'+
     '<div class="row">频道：<select id="chatCh" onchange="S.chatChannel=this.value;render()">'+chOpts+'</select>'+(isNight?'<span class="muted">夜晚只能公聊</span>':'')+'</div>'+
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
-    (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
-    '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
     '<div id="chatLog" class="log chatlog" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
+    (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
+    '<div class="row chatinput"><input id="chatText" style="flex:1" placeholder="说点什么..." value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
     '<div id="chatMore" class="chatmore" onclick="jumpChatBottom()" style="display:none"></div>'+
     roundSection()+
     '</div>';
@@ -679,9 +694,11 @@ function leaveGame(){
   setTab('setup');
 }
 async function loadChat(){
-  if(!S.game || S.tab!=='chat') return;
+  if(!S.game) return;
   var d = await api('messages',{id:S.game.id,viewer:mySeatInGame(S.game),storyteller:!(S.game&&S.game.storyteller&&S.game.storyteller.type==='player')});
   S.chatMsgs = d.messages;
+  var ae = document.activeElement;
+  if (ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA')) { paintChat(); return; }
   render();
 }
 function logPanel(g){
@@ -807,7 +824,7 @@ async function refresh(){
   }
   render();
   if(S.tab==='wiki') loadWiki();
-  if(S.tab==='chat') loadChat();
+  if(S.game) loadChat();
 }
 setInterval(refresh, 3000);
 init();
