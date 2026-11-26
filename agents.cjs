@@ -300,11 +300,10 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('说书人（或另一位玩家）刚刚私聊了你（见上方对话最后几条私聊），这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
   } else if (mode === 'react') {
-    lines.push('刚才场上有人公开发言（见上方对话最后几条）。');
-    lines.push('先判断这条消息和你有没有关系：被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那必须接话。');
-    lines.push('如果和你没什么关系，多数时候不用接：say 写空字符串 "" 就好。一条消息不需要一群人都来回应。');
-    lines.push('要接的话只说一句：表明态度、提出怀疑、附议别人、给出你的信息，或为自己辩护。');
-    lines.push('不要复述别人刚说过的话；不要长篇大论。');
+    lines.push('现在轮到你思考：刚才场上有人公开发言（见上方对话最后几条）。');
+    lines.push('你要自己判断要不要接话。被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那一定要说一句。');
+    lines.push('即使暂时和你无关，也请尽量接一句：表明态度、附议或反驳、提出怀疑、给出你的信息、或为自己辩护。沉默太多会让场上没人讨论，对好人方不利。');
+    lines.push('确实无话可说时，say 才写空字符串 ""。要接的话只说一句，不要复述别人刚说过的话，不要长篇大论。');
     if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
     else lines.push('想单独问谁就私聊谁（whisper），不限次数；但别刷屏，一两句说清楚。');
   } else {
@@ -695,18 +694,10 @@ async function runRound(id, opts) {
     pool = opts.seats.map(Number).filter(function (n) { return order.indexOf(n) >= 0; });
     if (!pool.length) return { ok: false, error: '指定的座位不可唤醒' };
   } else if (opts.mode === 'react') {
-    /* 一条消息不该引来全场回应。优先唤醒「这条消息和它有关」的人：
-       被 @ 到 / 被点名的座位必须接话；其余座位最多补 1 位，凑够两三位即可。
-       这样一条消息通常只换回一两句，玩家有的是插话空间。 */
-    const mentioned = mentionedSeats(id);
-    const lead = order.filter(function (n) { return mentioned.indexOf(n) >= 0; });
-    const rest = order.filter(function (n) { return mentioned.indexOf(n) < 0; });
-    /* 上一轮刚结束没多久又被触发时，只让被点到的人回应，避免连珠炮 */
-    const lastAt = ROUND_LAST_AT.get(id) || 0;
-    const extra = (Date.now() - lastAt < ROUND_COOLDOWN_MS) ? 0 : REACT_EXTRA_SPEAKERS;
-    /* 至少唤醒 1 位：即使没被 @，平台上的话也不会石沉大海、无人回应 */
-    const cap = Math.min(order.length, Math.max(1, lead.length + extra));
-    pool = lead.concat(rest).slice(0, opts.limit > 0 ? Math.min(opts.limit, cap) : cap);
+    /* 每条公开消息都让「所有」AI 依次思考要不要接话：一位思考完再轮下一位。
+       是否被 @ / 被点名只影响它说出口的内容，不影响它是否获得思考机会。
+       是否开口由每位 AI 自己判断（say 留空即沉默）。 */
+    pool = order.slice();
   } else {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
   }
