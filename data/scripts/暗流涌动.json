@@ -73,5 +73,7 @@
     ]
   },
   "wiki": "暗流涌动.md",
-  "custom": false
+  "custom": false,
+  "minPlayers": 5,
+  "maxPlayers": 12
 }

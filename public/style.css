@@ -324,6 +324,8 @@ body.hasbg .left,body.hasbg.night .left{background:transparent;border-color:tran
 .drawer.side{left:0;border-radius:0 12px 12px 0}
 .drawer.chat{right:0;border-radius:12px 0 0 12px}
 .drawer.dm{right:0;border-radius:12px 0 0 12px}
+/* 公聊与私聊同时展开：私聊右侧紧贴公聊，右缘补圆角 */
+.drawer.dm.roundright{border-radius:12px}
 body.night .drawer{background:rgba(10,9,22,calc(.55 + .42 * var(--panel-alpha,.4)));border-color:rgba(160,148,220,.22)}
 .drawerbody{flex:1;min-height:0;overflow-y:auto;padding:14px}
 .drawer .chatwrap{padding:12px;flex:1;min-height:0}
@@ -342,3 +344,18 @@ body.night .handle{background:rgba(12,10,26,calc(.6 + .3 * var(--panel-alpha,.4)
 .handle.unread::after{content:'';position:absolute;top:6px;right:5px;width:7px;height:7px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 6px #ff5a5a}
 @keyframes handlePulse{0%,100%{opacity:.55;box-shadow:0 0 0 rgba(255,212,121,0)}50%{opacity:1;box-shadow:0 0 14px rgba(255,212,121,.85);border-color:var(--gold)}}
 body.night .handle.unread::after{background:#ff8fa3;box-shadow:0 0 6px #ff8fa3}
+
+/* 作弊页分组 */
+.cheatgrp{border:1px solid var(--edge2,#4a3c28);border-radius:10px;padding:10px 12px;margin-bottom:12px;background:rgba(0,0,0,.14)}
+.cheatgrp h4{margin:0 0 8px;font-size:14px;color:var(--gold)}
+.cheatgrp .row{margin-top:9px}
+body.night .cheatgrp{border-color:var(--edge2);background:rgba(255,255,255,.04)}
+
+/* 说书人日志（作弊页实时查看） */
+.stlog{max-height:340px;overflow:auto;font-size:12.5px;line-height:1.65;border:1px solid var(--edge2,#4a3c28);border-radius:8px;padding:6px 8px;background:rgba(0,0,0,.18)}
+.stlogrow{display:flex;gap:8px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+.stlogrow:last-child{border-bottom:none}
+.stlogt{flex:0 0 auto;color:var(--dim,#9c8f7a);font-variant-numeric:tabular-nums}
+.stlogk{flex:0 0 auto;color:var(--gold);font-weight:700;min-width:34px}
+.stlogx{flex:1 1 auto;color:var(--parch);white-space:pre-wrap;word-break:break-word}
+body.night .stlog{background:rgba(255,255,255,.04)}

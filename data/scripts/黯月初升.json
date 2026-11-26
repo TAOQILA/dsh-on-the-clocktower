@@ -79,5 +79,7 @@
     ]
   },
   "wiki": "黯月初升.md",
-  "custom": false
+  "custom": false,
+  "minPlayers": 5,
+  "maxPlayers": 12
 }

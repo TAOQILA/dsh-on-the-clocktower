@@ -115,6 +115,8 @@ function buildApi(opts){
   roundStatus: (b) => A.status(b.id),
   /* 说书人 Agent：主持夜间流程 */
   storyRound: (b) => A.runStoryteller(b.id, b),
+  storyLog: (b) => E.storyLog(b.id),
+  setStyle: (b) => E.setStyle(b.id, b.style),
   openVote: (b) => E.openVote(b.id, b.target),
   castVote: (b) => E.castVote(b.id, b.seat, b.yes !== false),
   resolveVote: (b) => E.resolveVote(b.id),

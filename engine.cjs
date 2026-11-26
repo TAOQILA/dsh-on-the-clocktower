@@ -42,6 +42,7 @@ function createGame(cfg){
     id, script: cfg.script, created_at: new Date().toISOString(),
     phase: 'setup', night: 0, day: 0, turn: 0,
     storyteller: cfg.storyteller, seats: cfg.seats,
+    aiStyle: cfg.aiStyle || 'mild_fun',
     roles: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [],
     log: [], readAcks: []
   };
@@ -337,6 +338,36 @@ function createAndStart(cfg){
   return loadState(s.id);
 }
 
+/* 切换本局所有 AI 的说话风格（含说书人） */
+function setStyle(id, style){
+  const s = loadState(id);
+  s.aiStyle = String(style || 'mild_fun');
+  saveState(id, s);
+  log(id, '系统', 'AI 说话风格切换为 '+s.aiStyle, true);
+  return { ok:true, aiStyle:s.aiStyle };
+}
+
+/* 说书人完整日志：把 seat-storyteller 目录下所有 .jsonl 与 state.log 中说书人条目按时间合并，供作弊页实时查看 */
+function storyLog(id){
+  const rows = [];
+  const dir = path.join(gameDir(id), 'agents', 'seat-storyteller');
+  if (fs.existsSync(dir)) {
+    fs.readdirSync(dir).filter(function(f){ return /\.jsonl$/.test(f); }).forEach(function(f){
+      const p = path.join(dir, f);
+      const kind = f.replace(/\.jsonl$/, '');
+      fs.readFileSync(p, 'utf8').split(/\r?\n/).forEach(function(line){
+        if (!line.trim()) return;
+        try { const o = JSON.parse(line); rows.push({ t: o.t || '', kind: kind, text: o.text || '', data: o }); } catch(e) {}
+      });
+    });
+  }
+  try {
+    const st = loadState(id);
+    (st.log || []).forEach(function(x){ if (x.who === '说书人') rows.push({ t: x.t || '', kind: 'log', text: x.text || '', data: x }); });
+  } catch(e) {}
+  rows.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
+  return rows;
+}
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
-  agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote };
+  agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle };

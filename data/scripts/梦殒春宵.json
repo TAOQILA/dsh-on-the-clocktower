@@ -79,5 +79,7 @@
     ]
   },
   "wiki": "梦殒春宵.md",
-  "custom": false
+  "custom": false,
+  "minPlayers": 5,
+  "maxPlayers": 12
 }

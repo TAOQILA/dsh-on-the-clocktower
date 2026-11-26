@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.12.6';
+var VERSION = '0.13.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -22,7 +22,8 @@ async function api(name, data){
 }
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
-  bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true };
+  bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -49,7 +50,7 @@ async function init(){
   }
   render();
 }
-function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); }
+function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); if(t==='cheat') loadStoryLog().then(function(){ render(); }); }
 /* 建局偏好落盘：刷新页面后座位名/模型、说书人模型、剧本都还在 */
 var PREF_KEY = 'ran.prefs.v1';
 var ACTIVE_GAME_ID = '';
@@ -81,6 +82,7 @@ function savePrefs(){
       bgBlur: (typeof S.bgBlur === 'number' ? S.bgBlur : 7.5),
       bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 20),
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
+      aiStyle: S.aiStyle || 'mild_fun',
       activeGame: S.game ? S.game.id : '',
       activeGameSt: S.game ? iAmStoryteller(S.game) : false,
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
@@ -126,7 +128,8 @@ function loadPrefs(){
 }
 /* 调整人数：只增删尾部座位，已有座位的名字与模型原样保留 */
 function resizeSeats(n){
-  n = Math.max(5, Math.min(30, n|0));
+  var lo = (S.script && S.script.minPlayers) || 5, hi = (S.script && S.script.maxPlayers) || 12;
+  n = Math.max(lo, Math.min(hi, n|0));
   var cur = S.seats || [], next = [];
   for (var i=0;i<n;i++){
     if (cur[i]) { next.push(cur[i]); continue; }
@@ -455,7 +458,7 @@ function drawTable(seats,g){
     var marks = g && g.markers[i] ? g.markers[i].join(' ') : '';
     var bub = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
     el.innerHTML = (bub ? '<div class="bubbles">'+bub+'</div>' : '') +
-      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div><div class="token">'+(mine?'你':'AI')+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
+      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div><div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
       '<div class="nameline"><div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
@@ -613,8 +616,8 @@ function setupPanel(){
   var pills = '';
   return '<div class="section"><h3>建局配置</h3>'+
     '<p class="muted">先在这里定下剧本、人数、谁是「你」以及各座位的昵称；每个座位用哪个模型请到「AI 设置」页配置。</p>'+
-    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);savePrefs();render()">'+scripts+'</select></div>'+
-    '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px" title="减少人数只删除编号最大的座位">'+
+    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);if(S.script)resizeSeats(S.seats.length);savePrefs();render()">'+scripts+'</select></div>'+
+    '<div class="row">人数：<input id="seatCount" type="number" min="'+((S.script&&S.script.minPlayers)||5)+'" max="'+((S.script&&S.script.maxPlayers)||12)+'" value="'+S.seats.length+'" style="width:60px" title="人数范围由所选剧本决定">'+
     '<button onclick="resizeSeats(+document.getElementById(\'seatCount\').value);render()">应用人数</button></div>'+
     '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
     (S.game
@@ -790,7 +793,7 @@ async function startGame(){
   var seatsNew = S.seats.map(function(s,i){
     return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
   });
-  var cfg = { script:S.script.name, seats:seatsNew,
+  var cfg = { script:S.script.name, seats:seatsNew, aiStyle:(S.aiStyle||'mild_fun'),
     storyteller:(zone==='story')
       ? {type:'player',name:'我'}
       : {type:'agent',name:(S.storyName||'说书人'),provider:S.storyProvider||'',model:S.storyModel||''} };
@@ -971,20 +974,26 @@ function cheatPanel(seats, sel){
   var g = S.game;
   if (!g) return '<div class="section"><h3>作弊</h3><p class="muted">还没有对局。</p></div>';
   var roleOpts = '<option value="">—</option>' + (S.script ? S.script.roles : []).map(function(r){ return '<option>'+r+'</option>'; }).join('');
-  var seatOpts = seats.map(function(s,i){ return '<option value="'+i+'">'+(i+1)+' 号 '+esc(s.name)+'</option>'; }).join('');
-  return '<div class="section"><h3>作弊 · 控制他人发言</h3>'+
-    '<p class="muted">这里的操作会直接写进对局，说书人 Agent 也不会收到通知。仅在需要救场时使用。</p>'+
-    '<div class="row">座位：<select id="cheatSeat" onchange="S.selSeat=+this.value;render()">'+seatOpts+'</select></div>'+
+  var seatOpts = seats.map(function(s,i){ return '<option value="'+i+'"'+(i===S.selSeat?' selected':'')+'>'+(i+1)+' 号 '+esc(s.name)+'</option>'; }).join('');
+  var seatRow = '<div class="row">目标座位：<select id="cheatSeat" onchange="S.selSeat=+this.value;render()">'+seatOpts+'</select></div>';
+  var h = '<div class="section"><h3>作弊</h3><p class="muted">这里的操作会直接写进对局，说书人 Agent 不会收到通知。仅在救场或测试时使用。</p>'+seatRow;
+  h += '<div class="cheatgrp"><h4>发言与驱动</h4>'+
     '<div class="row"><input id="cheatSay" class="smname-input" placeholder="用这个座位发一条公开消息">'+
     '<button onclick="cheatSpeak()">发言</button></div>'+
-    '<div class="row"><button onclick="cheatRound()">让所有 AI 回复一次</button>'+
-    '<button onclick="cheatStory()">让说书人 Agent 主持这一阶段</button></div>'+
+    '<div class="row"><button onclick="cheatRound()">让 AI 们随机接一轮</button>'+
+    '<button onclick="cheatStory()">让说书人主持这一阶段</button></div></div>';
+  h += '<div class="cheatgrp"><h4>角色与信息</h4>'+
     '<div class="row">分配角色：<select id="cheatRole">'+roleOpts+'</select>'+
     '<button onclick="api(\'role\',{id:S.game.id,seat:S.selSeat,role:document.getElementById(\'cheatRole\').value}).then(refresh)">分配</button></div>'+
     '<div class="row">下发私有信息：<input id="cheatInfo" class="smname-input" placeholder="说书人私聊发给该座位">'+
-    '<button onclick="api(\'info\',{id:S.game.id,seat:S.selSeat,text:document.getElementById(\'cheatInfo\').value}).then(refresh)">发送</button></div>'+
-    '<div class="row">处决该座位：<button onclick="if(confirm(\'确定处决该座位？\'))api(\'execute\',{id:S.game.id,seat:S.selSeat}).then(refresh)">处决</button>'+
-    '<button onclick="if(confirm(\'确定宣布本局结束？\'))doEndGame()">宣布终局</button></div></div>';
+    '<button onclick="api(\'info\',{id:S.game.id,seat:S.selSeat,text:document.getElementById(\'cheatInfo\').value}).then(refresh)">发送</button></div></div>';
+  h += '<div class="cheatgrp"><h4>死亡与终局</h4>'+
+    '<div class="row"><button onclick="if(confirm(\'确定处决该座位？处决后会立刻进入夜晚。\'))api(\'execute\',{id:S.game.id,seat:S.selSeat}).then(refresh)">处决该座位（立刻入夜）</button></div>'+
+    '<div class="row"><button onclick="if(confirm(\'确定杀死该座位？普通死亡不会立刻入夜。\'))api(\'kill\',{id:S.game.id,seat:S.selSeat,reason:\'作弊杀死\'}).then(refresh)">杀死该座位（不立即入夜）</button></div>'+
+    '<div class="row"><button onclick="if(confirm(\'确定宣布本局结束？\'))doEndGame()">宣布终局</button></div></div>';
+  h += '<div class="cheatgrp"><h4>说书人日志</h4>'+ storyLogHtml() +'</div>';
+  h += '</div>';
+  return h;
 }
 async function cheatSpeak(){
   var inp = document.getElementById('cheatSay'); if(!inp) return;
@@ -994,6 +1003,30 @@ async function cheatSpeak(){
 }
 async function cheatRound(){ await reactAll(); }
 async function cheatStory(){ await runStory(); }
+/* 说书人日志：把它的完整思考与操作按时间顺序摊开，作弊页实时查看 */
+function storyLogHtml(){
+  var rows = S.storyLog;
+  if (!rows) return '<p class="muted">正在读取说书人的日志…</p>';
+  if (!rows.length) return '<p class="muted">这一局说书人还没有留下日志（它可能还没开始思考）。</p>';
+  var KIND = { think:'思考', log:'操作', actions:'操作', speech:'发言' };
+  var body = rows.map(function(r){
+    var t = String(r.t || '').replace('T',' ').slice(11,19);
+    var k = KIND[r.kind] || r.kind || '';
+    var txt = r.text || '';
+    if (!txt && r.data) {
+      var d = r.data;
+      if (d.kind) txt = d.kind + (d.target != null ? ' → ' + d.target : '');
+      if (d.text) txt = d.text;
+    }
+    return '<div class="stlogrow"><span class="stlogt">'+esc(t)+'</span><span class="stlogk">'+esc(k)+'</span><span class="stlogx">'+esc(String(txt))+'</span></div>';
+  }).join('');
+  return '<div class="stlog" data-keep="stlog">'+body+'</div>';
+}
+async function loadStoryLog(){
+  if (!S.game) return;
+  try { S.storyLog = await api('storyLog', { id: S.game.id }); S.storyLogAt = Date.now(); }
+  catch(e){ S.storyLog = []; }
+}
 /* 设置页：所有开关分组整理 */
 function settingsPanel(){
   function sw(key,label,desc){
@@ -1008,6 +1041,7 @@ function settingsPanel(){
         '<input type="range" min="0" max="100" step="1" value="'+(S.bgBright==null?20:S.bgBright)+'" oninput="setBg(\'bgBright\',this.value)">'+
         '<div class="muted">50% 为原图亮度；越高越亮，100% 纯白，0% 纯黑。</div></div>'+
     '</div>';
+  var styleSel = modelStyleSelect();
   return '<div class="section"><h3>设置 · 外观</h3>'+
       '<div class="setrow"><label><input type="checkbox" '+(S.bgOn!==false?'checked':'')+' onchange="toggleBg(this)"> 显示背景图</label>'+
       '<div class="muted">白天与夜晚各有一张背景，切换阶段时自动渐变过渡；开启后界面底色透明，只保留圆桌。</div></div>'+
@@ -1020,6 +1054,7 @@ function settingsPanel(){
       sw('showBubbles','头像上方显示聊天气泡','只显示最近一条，20 秒后自动淡出。')+
       sw('showScriptLine','圆桌中心显示剧本名','')+
     '</div>'+
+    '<div class="section"><h3>设置 · AI 风格</h3>'+styleSel+'</div>'+
     '<div class="section"><h3>设置 · 自动流程</h3>'+
       sw('autoChat','进入白天时自动讨论','阶段切到白天时，AI 们自动接一轮话。')+
       sw('autoStory','进入夜晚时自动主持','阶段切到夜晚时，Agent 说书人自动结算这一夜。')+
@@ -1034,6 +1069,35 @@ function settingsPanel(){
       '<div class="row"><button onclick="if(confirm(\'清除本机保存的所有建局偏好？\')){localStorage.removeItem(PREF_KEY);location.reload();}">清除本机偏好</button></div>'+
       '<div class="muted">会清掉剧本、人数、昵称、模型、外观设置，回到默认。</div></div>';
 }
+/* AI 说话风格：7 档，从极端严肃到极端娱乐；把选中的档位写进 S.aiStyle，
+   开局后由后端 state.aiStyle 注入所有 Agent 的提示词（含说书人）。 */
+var AI_STYLE_LIST = [
+  ['super_serious','极端严肃'],['serious','严肃'],['mild_serious','轻度严肃'],
+  ['neutral','不干预'],['mild_fun','轻度娱乐'],['fun','娱乐'],['super_fun','极端娱乐']
+];
+function modelStyleSelect(){
+  var cur = S.aiStyle || 'mild_fun';
+  var opts = AI_STYLE_LIST.map(function(p){
+    return '<option value="'+p[0]+"'+(p[0]===cur?' selected':'')+'>'+p[1]+'</option>';
+  }).join('');
+  var tail = (S.game && S.game.id)
+    ? '<div class="muted">本局已开始：改动会立刻对本局所有 AI 生效。</div>'
+    : '<div class="muted">只影响之后创建的对局；也可以在建局页调整。</div>';
+  return '<div class="setrow"><div>AI 说话风格</div>'
+    +'<select onchange="setAiStyle(this.value)">'+opts+'</select>'
+    +'<div class="muted">极左更严肃理性，极右更轻松娱乐；不影响推理内容，只影响语气。</div>'
+    + tail + '</div>';
+}
+async function setAiStyle(key){
+  S.aiStyle = key || 'mild_fun';
+  savePrefs();
+  if (S.game && S.game.id) {
+    try { await api('setStyle',{ id:S.game.id, style:S.aiStyle }); }
+    catch(e){ S.startError = String((e && e.message) || e); }
+  }
+  render(true);
+}
+
 /* 背景：白天/夜晚两张图叠在一起，靠 body.bgnight 切 opacity 实现渐变；
    亮度以 50% 为原图，100% 纯白、0% 纯黑（用白色/黑色蒙层实现，不做计算）。 */
 function applyBg(){
@@ -1619,4 +1683,14 @@ async function refresh(){
   if(S.tab==='wiki') loadWiki();
 }
 setInterval(refresh, 3000);
+/* 每 40 秒随机唤醒一位存活 AI 思考一次（对局进行中、无其它轮次在跑时） */
+setInterval(function(){
+  if(!S.game || (S.game.win && S.game.win.over)) return;
+  if(S.round && S.round.running) return;
+  if(!canControl() && !iAmStoryteller(S.game)) return;
+  var alive=[]; (S.game.seats||[]).forEach(function(s,i){ if(s.type==='agent' && S.game.alive[i]) alive.push(i); });
+  if(!alive.length) return;
+  var pick=alive[Math.floor(Math.random()*alive.length)];
+  try{ api('round',{id:S.game.id, seats:[pick]}); }catch(e){}
+}, 40000);
 init();
