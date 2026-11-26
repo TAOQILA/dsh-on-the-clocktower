@@ -268,7 +268,7 @@ body.night .daytimer{}
 /* ================= 全屏背景（白天/夜晚双图渐变切换 + 模糊 + 亮度） ================= */
 #bgwrap{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:var(--bg)}
 .bglayer{position:absolute;inset:-8%;background-size:cover;background-position:center center;background-repeat:no-repeat;
-  opacity:0;transition:opacity 1.8s ease;filter:blur(var(--bg-blur,2px)) brightness(var(--bg-bright,1))}
+  opacity:0;transition:opacity 1.8s ease;filter:blur(var(--bg-blur,7.5px)) brightness(var(--bg-bright,1))}
 .bglayer.day{background-image:url('bg/day.png');opacity:1}
 body.bgnight .bglayer.day{opacity:0}
 body.bgnight .bglayer.night{opacity:1}
@@ -279,8 +279,8 @@ body.nobg #bgwrap{display:none}
 /* 背景开启时：界面本身透明，让背景贯通；只有圆桌保留底色 */
 body.hasbg{background:transparent}
 body.hasbg header{background:transparent;border-bottom-color:rgba(0,0,0,.18)}
-body.hasbg .left,body.hasbg .right,body.hasbg .chatcol{background:rgba(14,12,18,var(--panel-alpha,.75));border-color:rgba(255,255,255,.14)}
-body.hasbg.night .left,body.hasbg.night .right,body.hasbg.night .chatcol{background:rgba(10,9,22,var(--panel-alpha,.75));border-color:rgba(160,148,220,.22)}
+body.hasbg .left,body.hasbg .right,body.hasbg .chatcol{background:rgba(14,12,18,var(--panel-alpha,.4));border-color:rgba(255,255,255,.14)}
+body.hasbg.night .left,body.hasbg.night .right,body.hasbg.night .chatcol{background:rgba(10,9,22,var(--panel-alpha,.4));border-color:rgba(160,148,220,.22)}
 body.hasbg.night header{background:transparent}
 body.hasbg .log,body.hasbg.night .log,body.hasbg.night .log.chatlog{background:rgba(8,7,12,.55)}
 body.hasbg .chatcol{backdrop-filter:blur(1px)}
@@ -307,3 +307,28 @@ body.hasbg .section h3{border-bottom-color:rgba(255,255,255,.16)}
 body.hasbg.night .section h3{border-bottom-color:rgba(160,148,220,.24)}
 
 .sidearrow{font-size:15px;line-height:1;font-weight:900}
+
+/* ===== 覆盖式抽屉布局（圆桌永远居中，两侧面板浮在其上） ===== */
+.layout{display:block;position:relative;height:calc(100vh - 52px);padding:0;overflow:hidden}
+.left{position:absolute;inset:0;border:none;border-radius:0;background:transparent;backdrop-filter:none;box-shadow:none;display:grid;place-items:center;padding:14px;overflow:hidden;container-type:size}
+body.hasbg .left,body.hasbg.night .left{background:transparent;border-color:transparent}
+.drawer{position:absolute;top:0;bottom:0;z-index:8;display:flex;flex-direction:column;min-height:0;overflow:hidden;transition:transform .28s cubic-bezier(.2,.7,.3,1);border:1px solid rgba(255,255,255,.14);background:rgba(14,12,18,calc(.55 + .42 * var(--panel-alpha,.4)));backdrop-filter:blur(14px) saturate(1.15);box-shadow:0 10px 40px rgba(0,0,0,.55)}
+.drawer.side{left:0;border-radius:0 12px 12px 0}
+.drawer.chat{right:0;border-radius:12px 0 0 12px}
+.drawer.dm{right:0;border-radius:12px 0 0 12px}
+body.night .drawer{background:rgba(10,9,22,calc(.55 + .42 * var(--panel-alpha,.4)));border-color:rgba(160,148,220,.22)}
+.drawerbody{flex:1;min-height:0;overflow-y:auto;padding:14px}
+.drawer .chatwrap{padding:12px;flex:1;min-height:0}
+.drawer .dmcol{position:static;inset:auto;height:100%;border:none;border-radius:0;box-shadow:none;background:transparent;backdrop-filter:none;padding:12px}
+.handle{position:absolute;z-index:20;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:30px;padding:14px 0;border-radius:0 9px 9px 0;border:1px solid rgba(255,255,255,.16);background:rgba(20,16,12,calc(.6 + .3 * var(--panel-alpha,.4)));backdrop-filter:blur(10px);color:var(--parch);cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.handle:hover{border-color:var(--gold);color:var(--gold)}
+.h-chat,.h-dm{border-radius:9px 0 0 9px}
+body.night .handle{background:rgba(12,10,26,calc(.6 + .3 * var(--panel-alpha,.4)));border-color:rgba(160,148,220,.26)}
+.hlabel{writing-mode:vertical-rl;text-orientation:upright;font-size:12px;font-weight:900;letter-spacing:3px;line-height:1}
+.harrow{font-size:14px;font-weight:900;line-height:1}
+
+/* 有未读消息时，公聊/私聊拉手不断渐变闪烁，直到展开面板阅读 */
+.handle.unread{animation:handlePulse 1.15s ease-in-out infinite}
+.handle.unread::after{content:'';position:absolute;top:6px;right:5px;width:7px;height:7px;border-radius:50%;background:#ff5a5a;box-shadow:0 0 6px #ff5a5a}
+@keyframes handlePulse{0%,100%{opacity:.55;box-shadow:0 0 0 rgba(255,212,121,0)}50%{opacity:1;box-shadow:0 0 14px rgba(255,212,121,.85);border-color:var(--gold)}}
+body.night .handle.unread::after{background:#ff8fa3;box-shadow:0 0 6px #ff8fa3}

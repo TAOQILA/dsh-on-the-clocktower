@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.10.6';
+var VERSION = '0.11.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,9 +20,9 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:false, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:false, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
-  bgOn:true, bgBlur:2, bgBright:50, panelAlpha:75, hideSide:false };
+  bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:false };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -65,10 +65,10 @@ function savePrefs(){
       nightTheme: S.nightTheme !== false,
       showScriptLine: S.showScriptLine !== false,
       hideSide: S.hideSide === true,
-      panelAlpha: (typeof S.panelAlpha === 'number' ? S.panelAlpha : 75),
+      panelAlpha: (typeof S.panelAlpha === 'number' ? S.panelAlpha : 40),
       bgOn: S.bgOn !== false,
-      bgBlur: (typeof S.bgBlur === 'number' ? S.bgBlur : 2),
-      bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 50),
+      bgBlur: (typeof S.bgBlur === 'number' ? S.bgBlur : 7.5),
+      bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 20),
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
     }));
@@ -319,25 +319,46 @@ function render(force){
   else panel = gamePanel(seats,sel);
   var hdr = g?('对局 '+g.id):'未开局';
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
+  /* ---- 布局尺寸：圆桌永远居中，两侧面板都是覆盖式抽屉 ---- */
+  var vw = Math.max(320, window.innerWidth);
+  var sideW = Math.min(440, Math.round(vw * 0.40));
+  var chatW = Math.min(460, Math.round(vw * 0.44));
+  var dmW = Math.min(380, Math.round(vw * 0.38));
+  var HAN = 30; /* 抽屉拉手宽度 + 间距 */
+  var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
+  /* 主面板内容 */
+  var sideInner = '<div class="drawerbody" data-keep="right">' + winBanner(g) + '<div class="tabs">'+tabsHtml+'</div>' + idCard + panel + '</div>';
+  /* 拉手位置：展开时贴在自己面板的左侧外面，收起时贴在屏幕边缘 */
+  var hChatRight, hChatTop = '50%', hDmRight, hDmTop = '50%', hChatTopPx = 0, hDmTopPx = 0;
+  if (dmOpen){
+    hDmRight = (chatOpen ? chatW + HAN : 0) + dmW + 6;
+    hChatRight = chatOpen ? chatW + 6 : dmW + 6;
+    if (!chatOpen) hChatTop = 'calc(50% - 92px)';
+  } else {
+    hChatRight = chatOpen ? chatW + 6 : 0;
+    hDmRight = chatOpen ? chatW + 6 : HAN;
+    if (chatOpen) hDmTop = 'calc(50% - 92px)';
+  }
   $('#app').innerHTML =
-    '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
-    '<div class="layout'+(S.hideChat?' nochat':'')+(S.hideSide?' noside':'')+'">'+
-    '<div class="right" data-keep="right">'+ (S.hideSide
-      ? '<button class="sideexpand" onclick="toggleSide()" title="展开侧栏"><span class="sidearrow">‹</span><span>侧栏</span></button>'
-      : '<button class="sidefold" onclick="toggleSide()" title="收起侧栏">收起侧栏 ›</button>'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel) +'</div>'+
-    '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
-    '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div>'+
-    '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
-    '<div class="story">'+story+'</div>'+
-    ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')+
-    '</div>'+
-    '</div>'+ dmFloating(g) +'</div>'+
-    '<div class="chatcol"><div class="chatbar">'+
-      '<button class="dmopen'+(S.showDm?' on':'')+'" onclick="toggleDm()" title="打开 / 收起私聊" '+(g?'':'disabled')+'>'+(S.showDm?'× 收起私聊':'私聊')+'</button>'+
-      '<button class="chatfold" onclick="toggleChat()" title="收起 / 展开聊天">'+(S.hideChat?'<span class="sidearrow">›</span><span>聊天</span>':'收起聊天 ›')+'</button>'+
-    '</div>'+
-    (S.hideChat?'':'<div class="chatinner">'+ chatPanel(g) +'</div>')+'</div></div>';
-  drawTable(seats,g);
+    '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>' +
+    '<div class="layout'+(sideOpen?' side-open':'')+(chatOpen?' chat-open':'')+(dmOpen?' dm-open':'')+'">' +
+      '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
+        '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div>'+
+        '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
+        '<div class="story">'+story+'</div>'+
+        ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')+
+        '</div>'+
+      '</div></div>' +
+      /* 左侧栏：抽屉，覆盖在圆桌上方 */
+      '<aside class="drawer side" style="width:'+sideW+'px;transform:translateX('+(sideOpen?'0':'-100%')+')">'+ sideInner +'</aside>' +
+      '<button class="handle h-side" onclick="toggleSide()" title="'+(sideOpen?'收起侧栏':'展开侧栏')+'" style="left:'+(sideOpen?sideW+6:0)+'px;top:50%">'+ vlabel('侧边栏', sideOpen?'‹':'›') +'</button>' +
+      /* 公聊栏 + 私聊栏：两个抽屉，都在右侧 */
+      '<aside class="drawer chat" style="width:'+chatW+'px;right:0;transform:translateX('+(chatOpen?'0':'100%')+')">'+ chatPanel(g) +'</aside>' +
+      '<aside class="drawer dm" style="width:'+dmW+'px;right:'+(chatOpen?chatW+HAN:0)+'px;transform:translateX('+(dmOpen?'0':'100%')+')">'+ dmPanel(g) +'</aside>' +
+      '<button class="handle h-chat'+(S.chatUnread?' unread':'')+'" onclick="toggleChat()" title="'+(chatOpen?'收起公聊':'展开公聊')+'" style="right:'+hChatRight+'px;top:'+hChatTop+'">'+ vlabel('公聊栏', chatOpen?'›':'‹') +'</button>' +
+      '<button class="handle h-dm'+(S.dmUnread?' unread':'')+'" onclick="toggleDm()" title="'+(dmOpen?'收起私聊':'展开私聊')+'" style="right:'+hDmRight+'px;top:'+hDmTop+'">'+ vlabel('私聊栏', dmOpen?'›':'‹') +'</button>' +
+    '</div>';
+    drawTable(seats,g);
   fitBubbles();
   restoreScroll(keep);
 }
@@ -462,6 +483,10 @@ function cornerDock(g){
 }
 /* 左栏（聊天）收起 / 展开 */
 /* 右侧面板栏收起 / 展开 */
+/* 抽屉拉手的竖排文字：上面是文字，下面是箭头（‹ 收起 / › 展开） */
+function vlabel(text, arrow){
+  return '<span class="hlabel">'+text+'</span><span class="harrow">'+arrow+'</span>';
+}
 function toggleSide(){
   S.hideSide = !S.hideSide;
   savePrefs();
@@ -479,11 +504,12 @@ function setPanelAlpha(val){
   applyPanelAlpha();
 }
 function applyPanelAlpha(){
-  var a = (typeof S.panelAlpha === 'number' ? S.panelAlpha : 75) / 100;
+  var a = (typeof S.panelAlpha === 'number' ? S.panelAlpha : 40) / 100;
   document.body.style.setProperty('--panel-alpha', a.toFixed(3));
 }
 function toggleChat(){
   S.hideChat = !S.hideChat;
+  if (!S.hideChat) S.chatUnread = 0;
   savePrefs();
   render(true);
   setTimeout(placeMe, 0);
@@ -948,25 +974,25 @@ function settingsPanel(){
   function sw(key,label,desc){
     return '<div class="setrow"><label><input type="checkbox" '+(S[key]!==false?'checked':'')
       +' onchange="setOpt(\''+key+'\',this.checked)"> '+label+'</label>'
-      + (desc?('<div class="muted">'+desc+'</div>'):'');
+      + (desc?('<div class="muted">'+desc+'</div>'):'') + '</div>';
   }
   var scales = [0.85,0.9,1,1.1,1.2,1.3,1.5];
   var scaleBtns = scales.map(function(v){
     return '<button class="pill'+(Math.abs((S.fontScale||1)-v)<0.001?' on':'')+'" onclick="setOpt(\'fontScale\','+v+')">'+Math.round(v*100)+'%</button>';
   }).join('');
   var bgBox = '<div id="bgopts" style="'+(S.bgOn===false?'display:none':'')+'">'+
-      '<div class="setrow"><div>背景模糊度 <span class="setval" id="bgBlurVal">'+(S.bgBlur==null?2:S.bgBlur)+'%</span></div>'+
-        '<input type="range" min="0" max="20" step="0.5" value="'+(S.bgBlur==null?2:S.bgBlur)+'" oninput="setBg(\'bgBlur\',this.value)"></div>'+
-      '<div class="setrow"><div>背景亮度 <span class="setval" id="bgBrightVal">'+(S.bgBright==null?50:S.bgBright)+'%</span></div>'+
-        '<input type="range" min="0" max="100" step="1" value="'+(S.bgBright==null?50:S.bgBright)+'" oninput="setBg(\'bgBright\',this.value)">'+
+      '<div class="setrow"><div>背景模糊度 <span class="setval" id="bgBlurVal">'+(S.bgBlur==null?7.5:S.bgBlur)+'%</span></div>'+
+        '<input type="range" min="0" max="20" step="0.5" value="'+(S.bgBlur==null?7.5:S.bgBlur)+'" oninput="setBg(\'bgBlur\',this.value)"></div>'+
+      '<div class="setrow"><div>背景亮度 <span class="setval" id="bgBrightVal">'+(S.bgBright==null?20:S.bgBright)+'%</span></div>'+
+        '<input type="range" min="0" max="100" step="1" value="'+(S.bgBright==null?20:S.bgBright)+'" oninput="setBg(\'bgBright\',this.value)">'+
         '<div class="muted">50% 为原图亮度；越高越亮，100% 纯白，0% 纯黑。</div></div>'+
     '</div>';
   return '<div class="section"><h3>设置 · 外观</h3>'+
       '<div class="setrow"><label><input type="checkbox" '+(S.bgOn!==false?'checked':'')+' onchange="toggleBg(this)"> 显示背景图</label>'+
       '<div class="muted">白天与夜晚各有一张背景，切换阶段时自动渐变过渡；开启后界面底色透明，只保留圆桌。</div></div>'+
       bgBox+
-      '<div class="setrow"><div>侧边栏不透明度 <span class="setval" id="panelAlphaVal">'+Math.round(S.panelAlpha==null?75:S.panelAlpha)+'%</span></div>'+
-        '<input type="range" min="0" max="100" step="1" value="'+(S.panelAlpha==null?75:S.panelAlpha)+'" oninput="setPanelAlpha(this.value)">'+
+      '<div class="setrow"><div>侧边栏不透明度 <span class="setval" id="panelAlphaVal">'+Math.round(S.panelAlpha==null?40:S.panelAlpha)+'%</span></div>'+
+        '<input type="range" min="0" max="100" step="1" value="'+(S.panelAlpha==null?40:S.panelAlpha)+'" oninput="setPanelAlpha(this.value)">'+
         '<div class="muted">作用于左右两侧面板、公聊栏、说书人与旁观席小框、私聊浮层。100% 为不透明。</div></div>'+
       '<div class="setrow"><div>字号</div><div class="row">'+scaleBtns+'</div>'+
       '<div class="muted">整个界面按比例缩放。</div></div>'+
@@ -996,8 +1022,8 @@ function applyBg(){
   var body = document.body;
   body.classList.toggle('hasbg', on);
   body.classList.toggle('nobg', !on);
-  var blur = (typeof S.bgBlur === 'number' && isFinite(S.bgBlur)) ? S.bgBlur : 2;
-  var bright = (typeof S.bgBright === 'number' && isFinite(S.bgBright)) ? S.bgBright : 50;
+  var blur = (typeof S.bgBlur === 'number' && isFinite(S.bgBlur)) ? S.bgBlur : 7.5;
+  var bright = (typeof S.bgBright === 'number' && isFinite(S.bgBright)) ? S.bgBright : 20;
   body.style.setProperty('--bg-blur', blur + 'px');
   /* 50% = 原图：亮度用 filter 保持 1，靠白色蒙层提亮、黑色蒙层压暗 */
   body.style.setProperty('--bg-bright', '1');
@@ -1304,6 +1330,7 @@ function toggleDmTo(el){
 }
 function toggleDm(){
   S.showDm = !S.showDm;
+  if (S.showDm) S.dmUnread = 0;
   if (S.showDm && !(S.dmTo || []).length && S.game){
     var self = mySeatInGame(S.game);
     for (var i = 0; i < (S.game.seats || []).length; i++){ if (i !== self){ S.dmTo = [String(i)]; break; } }
@@ -1353,15 +1380,27 @@ async function sendDm(){
 }
 /* 离开当前对局（不删文件） */
 function leaveGame(){
-  S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.history=null;
+  S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.chatUnread=0; S.dmUnread=0; S.history=null;
   setTab('setup');
 }
 async function loadChat(skipRender){
   if(!S.game) return;
+  var oldMsgs = S.chatMsgs || [];
   try {
     var d = await api('messages',{id:S.game.id,viewer:mySeatInGame(S.game),storyteller:!(S.game&&S.game.storyteller&&S.game.storyteller.type==='player')});
-    S.chatMsgs = d.messages;
+    S.chatMsgs = d.messages || [];
   } catch(e){ return; }
+  /* 未读计数：新消息只在对应面板收起时累加；展开即视为已读。自己发的不算。 */
+  if (S.chatMsgs.length > oldMsgs.length){
+    var selfWho = !(S.game&&S.game.storyteller&&S.game.storyteller.type==='player') ? 'storyteller' : mySeatInGame(S.game);
+    var added = S.chatMsgs.slice(oldMsgs.length);
+    for (var _ui=0; _ui<added.length; _ui++){
+      var _m = added[_ui];
+      if (String(_m.from) === String(selfWho)) continue;
+      if (_m.channel === 'private'){ if (!S.showDm) S.dmUnread = (S.dmUnread||0)+1; }
+      else { if (S.hideChat) S.chatUnread = (S.chatUnread||0)+1; }
+    }
+  }
   if (skipRender) return;
   var ae = document.activeElement;
   if (ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA')) { paintChat(); paintDm(); return; }
@@ -1395,12 +1434,12 @@ async function openGame(id){
   try {
     var g = await api('game',{id:id, storyteller:false});
     if(!g) throw new Error('没有这一局');
-    S.game = g; S.selSeat = 0; S.tab = 'game'; S.round = null;
+    S.game = g; S.selSeat = 0; S.tab = 'game'; S.round = null; S.chatUnread = 0; S.dmUnread = 0;
     syncMeFromGame(g);
     render();
   } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }
 }
-function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; render(); }
+function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; S.chatUnread = 0; S.dmUnread = 0; render(); }
 /* 座位号配色：颜色跟着「座位号」走，不跟人走。换人、改名都不改色。 */
 var SEAT_COLORS = ['#e0603c','#e0a13c','#cfd84a','#5fc26a','#3fc0b0','#3f9ae0',
                    '#6f7ce8','#a86fe0','#e06fae','#e05f7f','#b08a5c','#7fc0e0'];
