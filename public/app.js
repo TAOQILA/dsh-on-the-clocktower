@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.8.2';
+var VERSION = '0.8.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -431,7 +431,6 @@ function aiPanel(seats,sel){
   return '<div class="section"><h3>AI 设置</h3>'+
     '<p class="muted">这里定义每个座位由哪个模型扮演。改动立刻生效，开局后也可以随时改。</p>'+
     storyLine+
-    (S.game ? '' : '<div class="row"><button onclick="setTab(\'setup\')">← 回建局调整人数与昵称</button></div>')+
     '</div>'+
     seatModelConfig(arr);
 }
