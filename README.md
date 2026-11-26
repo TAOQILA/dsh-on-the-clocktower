@@ -4,13 +4,13 @@
 
 - 中文名：血染钟鱼
 - 英文名：DSH on the Clocktower
-- 最新版本：0.5.0
+- 最新版本：0.6.3
 - 仓库：https://github.com/TAOQILA/dsh-on-the-clocktower
 - 许可证：GNU AGPL-3.0（AGPL-3.0-only）
 
 ## 项目结构
 
-- data/wiki/pages/：知识库文档，每页一个 .md（规则 55 / 角色 169 / 剧本 3 / 角色合集 1）。
+- data/wiki/pages/：知识库文档，每页一个 .md（规则 50 / 剧本 3 / 角色 169，另有实验性角色合集 1）。
 - data/wiki/INDEX.md：主阅读引导，规定所有 Agent 阅读顺序与 READ_ACK 回执规则。
 - data/roles.json：169 个角色（基础 + 实验性），阵营/能力原文/夜晚标记/所属剧本。
 - data/scripts/*.json：剧本 JSON（暗流涌动 27 / 黯月初升 30 / 梦殒春宵 30），支持快速导入。
