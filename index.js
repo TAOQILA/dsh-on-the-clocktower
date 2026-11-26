@@ -19,7 +19,7 @@ export const inject = []
 const MOUNT = '/dsh-on-the-clocktower'
 const PORT = Number(process.env.BOTC_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
 const MAX_TOKENS = 1200
-const VERSION = '0.5.8'
+const VERSION = '0.5.9'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -97,24 +97,52 @@ function makeLlmCall(ctx) {
   }
 }
 
+/* llm.listProviders() 返回的是 { id, name } 对象数组（不是字符串数组），
+   listModels 要走 registration(provider).adapter.listModels(provider) 才能取到清单。 */
+function normalizeModelRows(listed) {
+  if (!Array.isArray(listed)) return []
+  const out = []
+  for (const m of listed) {
+    if (typeof m === 'string') { if (m) out.push({ id: m, name: m }); continue }
+    if (!m || !m.id) continue
+    out.push({ id: String(m.id), name: String(m.name || m.displayName || m.id) })
+  }
+  return out
+}
+
+async function modelsForProvider(llm, provider) {
+  if (!provider) return []
+  try {
+    if (typeof llm.listModels === 'function') {
+      const rows = normalizeModelRows(await llm.listModels(provider))
+      if (rows.length > 0) return rows
+    }
+  } catch {}
+  try {
+    const reg = typeof llm.registration === 'function' ? llm.registration(provider) : null
+    const adapter = reg && reg.adapter
+    if (adapter && typeof adapter.listModels === 'function') {
+      return normalizeModelRows(await adapter.listModels(provider))
+    }
+  } catch {}
+  return []
+}
+
 function makeListModels(ctx) {
   return async function listModels() {
     const llm = ctx && typeof ctx.get === 'function' ? ctx.get('llm') : null
-    if (!llm) return { providers: [] }
-    let ids = []
-    try { ids = typeof llm.listProviders === 'function' ? llm.listProviders() : [] } catch { ids = [] }
-    if (!Array.isArray(ids)) ids = []
+    if (!llm) return { providers: [], default: null }
+    let raw = []
+    try { raw = typeof llm.listProviders === 'function' ? llm.listProviders() : [] } catch { raw = [] }
+    if (!Array.isArray(raw)) raw = []
+    const seen = {}
     const providers = []
-    for (const id of ids) {
-      let models = []
-      try { models = typeof llm.listModels === 'function' ? await llm.listModels(id) : [] } catch { models = [] }
-      if (!Array.isArray(models)) models = []
-      providers.push({
-        id: String(id),
-        models: models
-          .map((m) => (typeof m === 'string' ? { id: m, name: m } : { id: String(m && m.id ? m.id : ''), name: String((m && (m.name || m.id)) || '') }))
-          .filter((m) => m.id),
-      })
+    for (const entry of raw) {
+      const id = typeof entry === 'string' ? entry : String((entry && (entry.id || entry.provider)) || '')
+      if (!id || seen[id]) continue
+      seen[id] = true
+      const name = typeof entry === 'object' && entry && entry.name ? String(entry.name) : id
+      providers.push({ id: id, name: name, models: await modelsForProvider(llm, id) })
     }
     const def = currentRoute(ctx)
     return { providers: providers.filter((p) => p.models.length), default: def || null }

@@ -1,5 +1,5 @@
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.5.8';
+var VERSION = '0.5.9';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -196,7 +196,7 @@ function setupPanel(){
     (S.game
       ? '<p class="muted">本局已开始，「你」的位置已写入对局、不可再改；要换身份请新建一局。</p>'
       : '<p class="muted">按住「你」拖到目标位置松手即可（也可点一下拿起、再点目标位置）。</p>')+
-    ((meZone()!=='story')?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);S.storyProvider=q.provider;S.storyModel=q.model')+'</div>'):'')+
+    ((meZone()!=='story')?('<div class="row">说书人模型：'+modelSelect('storyModelSel',S.storyProvider,S.storyModel,'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>'):'')+
     '<div class="row"><button id="startBtn" onclick="startGame()" '+(S.starting?'disabled':'')+'>'+(S.starting?'正在创建并进入第一夜...':'创建对局并进入第一夜')+'</button></div>'+
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
     '<p class="muted">默认每个人都是 AI。把「你」放到某个座位，你就成为那位玩家；放到说书人圆圈，你就当说书人；放到旁观席，你就只是看。其余座位都由 Agent 扮演。</p>'+
@@ -204,12 +204,20 @@ function setupPanel(){
 }
 function toggleSeat(i){ dropMe('seat', i); }
 async function saveSeatModel(seat, provider, model){
+  var arr = S.game ? S.game.seats : S.seats;
+  if (arr && arr[seat]) { arr[seat].provider = provider || ''; arr[seat].model = model || ''; }
+  if (!S.game) { render(); return; }
   if(!S.game) return;
   try { await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model}); S.game = await api('game',{id:S.game.id}); render(); } catch(e){}
 }
 async function saveStoryModel(provider, model){
-  if(!S.game) return;
-  try { await api('seatModel',{id:S.game.id,seat:'storyteller',provider:provider,model:model}); S.game = await api('game',{id:S.game.id}); render(); } catch(e){}
+  S.storyProvider = provider || ''; S.storyModel = model || '';
+  if(!S.game) { render(); return; }
+  try {
+    await api('seatModel',{id:S.game.id,seat:'storyteller',provider:provider,model:model});
+    S.game = await api('game',{id:S.game.id});
+    render();
+  } catch(e){ S.startError = '说书人模型保存失败：'+((e&&e.message)||e); render(); }
 }
 async function startGame(){
   if (S.starting) return;
@@ -245,7 +253,7 @@ function seatPanel(seats,sel){
     '<div class="row">身份：<b>'+((meZone()==='seat'&&S.me.seat===S.selSeat)?'你（真人玩家）':'Agent 玩家')+'</b>'+
     (S.game?'':' <button onclick="dropMe(\'seat\','+S.selSeat+')">把「你」放到这里</button>')+'</div>'+
     '<div class="row">名字：<input value="'+sel.name+'" onchange="seats[S.selSeat].name=this.value;render()"></div>'+
-    '<div class="row">模型：'+modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);seats[S.selSeat].provider=q.provider;seats[S.selSeat].model=q.model;saveSeatModel(S.selSeat,q.provider,q.model)')+'</div>'+
+    '<div class="row">模型：'+(sel.type==='human'?'<b>你</b>（无需模型）':modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)'))+'</div>'+
     speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>';
 }
 function storyPanel(seats,sel,roles,phase){
@@ -257,6 +265,7 @@ function storyPanel(seats,sel,roles,phase){
     '<button onclick="api(\'role\',{id:S.game.id,seat:'+S.selSeat+',role:document.getElementById(\'roleSel\').value}).then(refresh)">分配</button></div>'+
     '<div class="row">下发私有信息：<input id="infoText" placeholder="例如：你是小恶魔，爪牙是 3 号"><button onclick="api(\'info\',{id:S.game.id,seat:'+S.selSeat+',text:document.getElementById(\'infoText\').value}).then(refresh)">发送</button></div>'+
     '<div class="row">阶段：<select onchange="api(\'phase\',{id:S.game.id,phase:this.value}).then(refresh)">'+phaseOpts+'</select></div></div>'+
+    modelPanel(),
     '<div class="section"><h3>操作</h3>'+
     '<div class="row">标记：<select id="markSel"><option>中毒</option><option>醉酒</option><option>被保护</option><option>死亡</option></select>'+
     '<button onclick="api(\'marker\',{id:S.game.id,seat:'+S.selSeat+',marker:document.getElementById(\'markSel\').value}).then(refresh)">切换</button></div>'+
@@ -266,6 +275,29 @@ function storyPanel(seats,sel,roles,phase){
     '<button onclick="api(\'agentSpeak\',{id:S.game.id,seat:'+S.selSeat+',prompt:\'请发言\'}).then(function(x){document.getElementById(\'say\').value=x.text;refresh()})">让该 Agent 发言</button></div>'+
     '<textarea id="say" readonly placeholder="Agent 发言显示在这里"></textarea></div>' +
     roundSection();
+}
+/* 模型面板：开局前后都能改，说书人与每个座位各自独立 */
+function modelPanel(){
+  var g = S.game; if(!g) return '';
+  var seats = g.seats || [];
+  var stAgent = g.storyteller && g.storyteller.type === 'agent';
+  var rows = '';
+  if (stAgent) {
+    rows += '<div class="row">说书人：'+modelSelect('stModelSel', g.storyteller.provider, g.storyteller.model,
+      'var k=this.value;var q=splitKey(k);saveStoryModel(q.provider,q.model)')+'</div>';
+  } else {
+    rows += '<div class="row">说书人：<b>你</b>（无需模型）</div>';
+  }
+  var selOpts = seats.map(function(s,i){ return opt(i, (i+1)+' 号 · '+s.name+(s.type==='human'?'（你）':'') , S.selSeat); }).join('');
+  var cur = seats[S.selSeat] || {};
+  var agentSeat = cur.type !== 'human';
+  rows += '<div class="row">座位：<select onchange="S.selSeat=+this.value;render()">'+selOpts+'</select>'+
+    (agentSeat
+      ? modelSelect('gmSeatModelSel', cur.provider, cur.model, 'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)')
+      : '<b>你</b>（无需模型）')+'</div>';
+  return '<div class="section"><h3>模型</h3>'+
+    '<p class="muted">每个座位、以及说书人，都可以单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型。改动立刻生效，无需重开。</p>'+
+    rows+'</div>';
 }
 /* 轮次驱动器：一次唤醒全场存活 Agent，按座位顺序串行发言 */
 function roundSection(){
