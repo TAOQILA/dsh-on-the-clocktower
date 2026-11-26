@@ -234,6 +234,7 @@ body.night *::-webkit-scrollbar-thumb:hover{background:#4b3f7d;background-clip:c
 .dmfab.on{background:#231b3f;border-color:#7a68d8;color:#cfc6ff}
 .dmcol{position:absolute;inset:34px 0 0 0;display:flex;flex-direction:column;min-height:0;gap:6px;padding:10px;border:1px solid #7a68d8;border-radius:10px;background:rgba(20,16,32,calc(.55 + .42 * var(--panel-alpha)));box-shadow:0 10px 30px rgba(0,0,0,.65);backdrop-filter:blur(3px)}
 .dmhead{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:900;color:#cfc6ff;flex-wrap:wrap}
+.dmhead b{font-size:16px;color:var(--gold);font-weight:900}
 .dmnighttip{font-size:12px;font-weight:400;color:var(--muted,#b9a98a);margin-left:2px}
 .dmhead .dmclose{margin-left:auto;background:transparent;border:1px solid #7a68d8;color:#cfc6ff;border-radius:8px;padding:2px 9px;font-size:13px;cursor:pointer}
 .dmhead .dmclose:hover{background:#3a2f5c}
