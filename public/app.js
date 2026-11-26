@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.7.4';
+var VERSION = '0.7.5';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -33,9 +33,42 @@ async function init(){
   if (!S.scripts.length){ $('#app').innerHTML='<p style="padding:30px">未找到剧本 JSON，请检查 data/scripts/</p>'; return; }
   S.script = S.scripts[0];
   S.seats = defaultSeats(7);
+  loadPrefs();
   render();
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); }
+/* 建局偏好落盘：刷新页面后座位名/模型、说书人模型、剧本都还在 */
+var PREF_KEY = 'botc.prefs.v1';
+function savePrefs(){
+  try {
+    localStorage.setItem(PREF_KEY, JSON.stringify({
+      script: S.script ? S.script.name : '',
+      storyProvider: S.storyProvider || '',
+      storyModel: S.storyModel || '',
+      seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
+    }));
+  } catch(e){}
+}
+function loadPrefs(){
+  try {
+    var raw = localStorage.getItem(PREF_KEY);
+    if (!raw) return false;
+    var o = JSON.parse(raw);
+    if (!o) return false;
+    if (o.script && S.scripts) {
+      var hit = S.scripts.filter(function(x){ return x.name === o.script; })[0];
+      if (hit) S.script = hit; else return false;
+    }
+    S.storyProvider = o.storyProvider || '';
+    S.storyModel = o.storyModel || '';
+    if (Array.isArray(o.seats) && o.seats.length >= 5 && o.seats.length <= 30) {
+      S.seats = o.seats.map(function(x,i){
+        return { seat:i, name:String(x.name||('玩家'+(i+1))), type:'agent', provider:x.provider||'', model:x.model||'' };
+      });
+    }
+    return true;
+  } catch(e){ return false; }
+}
 /* 调整人数：只增删尾部座位，已有座位的名字与模型原样保留 */
 function resizeSeats(n){
   n = Math.max(5, Math.min(30, n|0));
@@ -52,6 +85,7 @@ function resizeSeats(n){
   }
   for (var j=0;j<next.length;j++) next[j].seat = j;
   S.seats = next;
+  savePrefs();
   if (S.me.zone==='seat' && S.me.seat >= n) { S.me.zone = 'spectator'; S.me.seat = 0; }
   return next;
 }
@@ -77,6 +111,7 @@ async function randomizeNames(){
   if (!arr || !arr.length) return;
   var picks = pickNicks(arr.length);
   for (var i=0;i<arr.length;i++) arr[i].name = picks[i];
+  if (!S.game) savePrefs();
   render();
   if (!S.game) return;
   for (var j=0;j<arr.length;j++){
@@ -338,7 +373,7 @@ function setupPanel(){
     return '<span class="pill '+(mine?'on':'')+'" onclick="dropMe(\'seat\','+i+')">'+(mine?'你 · ':'')+(i+1)+' 号 · '+s.name+'</span>';
   }).join('');
   return '<div class="section"><h3>建局配置</h3>'+
-    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);render()">'+scripts+'</select></div>'+
+    '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);savePrefs();render()">'+scripts+'</select></div>'+
     '<div class="row">人数：<input id="seatCount" type="number" min="5" max="30" value="'+S.seats.length+'" style="width:60px" title="减少人数只删除编号最大的座位">'+
     '<button onclick="resizeSeats(+document.getElementById(\'seatCount\').value);render()">应用人数</button></div>'+
     '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
@@ -374,7 +409,7 @@ async function renameSeat(seat, name){
   name = String(name||'').trim();
   var arr = S.game ? S.game.seats : S.seats;
   if (arr && arr[seat]) arr[seat].name = name;
-  if (!S.game) { render(); return; }
+  if (!S.game) { savePrefs(); render(true); return; }
   try {
     var cur = S.game.seats[seat] || {};
     await api('seatModel',{id:S.game.id,seat:seat,provider:cur.provider||'',model:cur.model||'',name:name});
@@ -390,14 +425,18 @@ async function saveSeatModel(seat, provider, model){
     var isAuto = !old.name || old.name === autoOld || /^玩家\d+$/.test(old.name);
     old.provider = provider || '';
     old.model = model || '';
-    if (isAuto) old.name = autoNameOf(old.provider, old.model);
+    /* 选「跟随默认模型」时 autoNameOf 为空，别把座位名清空 */
+    if (isAuto) { var autoNew = autoNameOf(old.provider, old.model); if (autoNew) old.name = autoNew; }
+    if (S.seats && S.seats[seat] && S.game) {
+      S.seats[seat].provider = old.provider; S.seats[seat].model = old.model; S.seats[seat].name = old.name;
+    }
   }
-  if (!S.game) { render(); return; }
+  if (!S.game) { savePrefs(); render(true); return; }
   try {
     var nm = arr && arr[seat] ? arr[seat].name : '';
     await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model,name:nm});
-    S.game = await api('game',gameReq()); render();
-  } catch(e){}
+    S.game = await api('game',gameReq()); savePrefs(); render(true);
+  } catch(e){ S.startError = '模型保存失败：'+((e&&e.message)||e); render(true); }
 }
 function autoNameOf(provider, model){
   if (!provider && !model) return '';
@@ -405,11 +444,12 @@ function autoNameOf(provider, model){
 }
 async function saveStoryModel(provider, model){
   S.storyProvider = provider || ''; S.storyModel = model || '';
-  if(!S.game) { render(); return; }
+  if(!S.game) { savePrefs(); render(true); return; }
   try {
     await api('seatModel',{id:S.game.id,seat:'storyteller',provider:provider,model:model});
     S.game = await api('game',gameReq());
-    render();
+    savePrefs();
+    render(true);
   } catch(e){ S.startError = '说书人模型保存失败：'+((e&&e.message)||e); render(); }
 }
 async function startGame(){
@@ -621,6 +661,7 @@ function gameReq(){ return { id:S.game.id, storyteller:iAmStoryteller(S.game) };
 /* 打开/创建对局后，把「你」的摆放同步成这一局里的真实身份 */
 function syncMeFromGame(g){
   if(!g) return;
+  if (g.storyteller) { S.storyProvider = g.storyteller.provider || ''; S.storyModel = g.storyteller.model || ''; }
   if (g.storyteller && g.storyteller.type === 'player'){ S.me = { zone:'story', seat:0 }; return; }
   for (var i=0;i<(g.seats||[]).length;i++){
     if (g.seats[i].type === 'human'){ S.me = { zone:'seat', seat:i }; return; }
