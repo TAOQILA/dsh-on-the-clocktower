@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.10.2';
+var VERSION = '0.10.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -416,7 +416,7 @@ function drawTable(seats,g){
     var bub = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
     el.innerHTML = (bub ? '<div class="bubbles">'+bub+'</div>' : '') +
       '<div class="seatnum">'+(i+1)+'</div><div class="token">'+(mine?'你':'AI')+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
-      '<div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div>';
+      '<div class="nameline"><div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
     table.appendChild(el);
