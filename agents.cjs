@@ -210,7 +210,8 @@ const RULES = [
   '你在玩一款社交推理游戏「血染钟鱼」，与人类玩家及其他 AI 玩家同桌。',
   '游戏分夜晚与白天：夜晚角色秘密行动，白天全员公开讨论、提名、投票处决。',
   '你只知道自己的角色和说书人私下告诉你的信息；不要编造自己没有的信息。',
-  '不要提及「提示词」「模型」「AI 系统」等元信息，像真人玩家一样说话。'
+  '不要提及「提示词」「模型」「AI 系统」等元信息，像真人玩家一样说话。',
+  '指代任何一位玩家时必须写成「@名字」，例如「我觉得 @长庚 有问题」。不要只用座位号，也不要只写名字而不带 @。'
 ].join('\n');
 
 function renderMessages(msgs, seats) {
@@ -242,6 +243,7 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('【你已经出局】死亡不等于闭嘴：你仍然可以公开发言、参与讨论、质疑别人、给队友递话，也仍然可以投票以外的意见表达。别沉默。');
   }
   lines.push('【场上】存活：' + (v.aliveList.join('，') || '无'));
+  lines.push('【称呼规则】提到任何一位玩家，一律写成「@名字」（例：@长庚 刚才的发言有问题）。只能用上面这份名单里的名字，别自己编名字。');
   if (v.deadList.length) lines.push('已死亡：' + v.deadList.join('，'));
   if (v.nominations.length) {
     lines.push('最近提名：' + v.nominations.map(function (n) {
@@ -475,6 +477,55 @@ function storyStatus(id) {
   return { running: r.running, done: r.done, result: r.result || null, error: r.error || null };
 }
 
+/* 处理一位 Agent 的回复：落 think、发公聊 / 私聊、记进本轮结果。
+   单独成函数，是为了让 runRound 能「一位说完再轮到下一位」。 */
+async function applyOne(id, seat, out, opts, run){
+  const st = E.loadState(id);
+  const parsed = out.error
+    ? { think: '', say: '', whisper: [], error: out.error }
+    : parseReply(out.text);
+  if (parsed.think) E.think(id, seat, parsed.think);
+  const dmReplyTo = (opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1;
+  const nightNow = (st.phase === 'night');
+  if (dmReplyTo >= 0) {
+    /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
+    let back = dialectText(parsed);
+    if (!back && !out.error) {
+      /* 模型没答上来时补一次强指令，私聊必须有回音 */
+      try {
+        const built2 = buildPrompt(id, seat, dmReplyTo, opts.mode);
+        const route2 = routeFor(id, seat);
+        const out2 = await callModel({
+          game: id, seat: seat,
+          prompt: built2.prompt + '\n\n【再强调一次】对方在等你回话。say 字段必须填写一句真实的回复，不能空。',
+          system: playerSystem(id, seat), provider: route2.provider, model: route2.model
+        });
+        const p2 = parseReply(out2.text);
+        back = dialectText(p2);
+        /* 把重试结果合进 parsed，保证结果面板与落库一致 */
+        if (back) { parsed.say = back; parsed.think = parsed.think || p2.think; }
+      } catch (e) { /* 重试失败就作罢 */ }
+    }
+    if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
+  } else if (parsed.say && String(parsed.say).trim()) {
+    E.say(id, seat, String(parsed.say).trim(), 'town');
+  }
+  (dmReplyTo >= 0 || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
+    /* 模型给的座位号是 1 起，落库用 0 起 */
+    const to = (w.to || []).map(function (n) { return Number(n) - 1; })
+      .filter(function (n) { return n >= 0 && n < st.seats.length && n !== seat; });
+    if (to.length) E.say(id, seat, w.text, 'private', to);
+  });
+  const dmBackFinal = (dmReplyTo >= 0) ? dialectText(parsed) : '';
+  run.results.push({
+    seat: seat,
+    say: (dmReplyTo >= 0) ? dmBackFinal : parsed.say,
+    whispers: (parsed.whisper || []).length,
+    think: parsed.think,
+    error: out.error || ((dmReplyTo >= 0 && !dmBackFinal) ? '私聊没有产生回复' : null)
+  });
+}
+
 async function runRound(id, opts) {
   opts = opts || {};
   const cur = RUNNING.get(id);
@@ -500,71 +551,26 @@ async function runRound(id, opts) {
 
   (async function () {
     try {
-      /* 所有 Agent 同时思考：模型调用是最慢的一段，串行会让最后一位等很久。
-         落库仍然按座位顺序串行 —— Engine 的状态是 loadState/saveState，并发写会互相覆盖。 */
-      const outs = await Promise.all(pool.map(function (seat) {
-        return (async function () {
-          try {
-            const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
-            const route = routeFor(id, seat);
-            const out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
-            return { seat: seat, out: out };
-          } catch (err) {
-            return { seat: seat, out: { error: String((err && err.message) || err) } };
-          } finally {
-            run.done++;
-            run.waiting = run.waiting.filter(function (n) { return n !== seat; });
-          }
-        })();
-      }));
-
-      for (const item of outs) {
-        const seat = item.seat, out = item.out;
-        const parsed = out.error
-          ? { think: '', say: '', whisper: [], error: out.error }
-          : parseReply(out.text);
-        if (parsed.think) E.think(id, seat, parsed.think);
-        const dmReplyTo = (opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1;
-        const nightNow = (E.loadState(id).phase === 'night');
-        if (dmReplyTo >= 0) {
-          /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
-          let back = dialectText(parsed);
-          if (!back && !out.error) {
-            /* 模型没答上来时补一次强指令，私聊必须有回音 */
-            try {
-              const built2 = buildPrompt(id, seat, dmReplyTo, opts.mode);
-              const route2 = routeFor(id, seat);
-              const out2 = await callModel({
-                game: id, seat: seat,
-                prompt: built2.prompt + '\n\n【再强调一次】对方在等你回话。say 字段必须填写一句真实的回复，不能空。',
-                system: playerSystem(id, seat), provider: route2.provider, model: route2.model
-              });
-              const p2 = parseReply(out2.text);
-              back = dialectText(p2);
-              /* 把重试结果合进 parsed，保证结果面板与落库一致 */
-              if (back) { parsed.say = back; parsed.think = parsed.think || p2.think; }
-            } catch (e) { /* 重试失败就作罢 */ }
-          }
-          if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
-        } else if (parsed.say && String(parsed.say).trim()) {
-          E.say(id, seat, String(parsed.say).trim(), 'town');
+      /* 严格按座位顺序，一位说完再轮到下一位：每个人的提示词都在上一位落库之后才构建，
+         所以后发言的人能看到先发言的人说了什么，信息才能真正互相影响。
+         （并发虽然快，但所有人同一时刻只拿到同一份旧记录，等于各说各的。） */
+      const outs = [];
+      for (const seat of pool) {
+        run.current = seat;
+        let out;
+        try {
+          const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
+          const route = routeFor(id, seat);
+          out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
+        } catch (err) {
+          out = { error: String((err && err.message) || err) };
         }
-        (dmReplyTo >= 0 || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
-          /* 模型给的座位号是 1 起，落库用 0 起 */
-          const to = (w.to || []).map(function (n) { return Number(n) - 1; })
-            .filter(function (n) { return n >= 0 && n < s.seats.length && n !== seat; });
-          if (to.length) E.say(id, seat, w.text, 'private', to);
-        });
-        const dmBackFinal = (dmReplyTo >= 0) ? dialectText(parsed) : '';
-        run.results.push({
-          seat: seat,
-          say: (dmReplyTo >= 0) ? dmBackFinal : parsed.say,
-          whispers: (parsed.whisper || []).length,
-          think: parsed.think,
-          error: out.error || ((dmReplyTo >= 0 && !dmBackFinal) ? '私聊没有产生回复' : null)
-        });
+        outs.push({ seat: seat, out: out });
+        await applyOne(id, seat, out, opts, run);
+        run.done++;
+        run.waiting = run.waiting.filter(function (n) { return n !== seat; });
       }
-      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位同时思考）');
+      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位依次发言）');
     } catch (err) {
       run.error = String((err && err.message) || err);
     } finally {

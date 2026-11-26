@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.8.6';
+var VERSION = '0.8.7';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -276,7 +276,27 @@ function render(force){
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
     '</div></div><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div></div>';
   drawTable(seats,g);
+  fitBubbles();
   restoreScroll(keep);
+}
+/* 气泡字数太多时自动缩小字号来适应固定大小的气泡：
+   从 11px 起逐级降到 7.5px；仍放不下就裁掉剩余内容并加省略号，保证永远不出框。 */
+function fitBubbles(){
+  var list = document.querySelectorAll('.bubble');
+  if (!list || !list.length) return;
+  for (var i = 0; i < list.length; i++){
+    var el = list[i];
+    el.classList.remove('clipped');
+    var size = 11;
+    el.style.fontSize = size + 'px';
+    var guard = 0;
+    while ((el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) && size > 7.5 && guard < 20){
+      size -= 0.5;
+      el.style.fontSize = size + 'px';
+      guard++;
+    }
+    if (el.scrollHeight > el.clientHeight + 1) el.classList.add('clipped');
+  }
 }
 /* 每个座位最近的几条发言：贴在其头像正上方（私聊紫色，公聊普通色） */
 function bubblesFor(seat){
@@ -313,7 +333,7 @@ function bubHtml(m){
   if (isDm && m.to && m.to.length){
     toTxt = '<span class="dmto"> → ' + m.to.map(function(x){ return (x+1); }).join('、') + ' 号</span>';
   }
-  return '<div class="bubble'+(isDm?' dm':'')+'">'+(isDm?'<span class="dmtag">私聊</span>':'')+esc(m.text)+toTxt+'</div>';
+  return '<div class="bubble'+(isDm?' dm':'')+'">'+(isDm?'<span class="dmtag">私聊</span>':'')+hlMentions(esc(m.text))+toTxt+'</div>';
 }
 function stBubbles(){
   var msgs = (S.chatMsgs || []).filter(function(m){ return m.from === 'storyteller'; });
@@ -755,11 +775,12 @@ function roundSection(){
   var waiting = st.waiting || [];
   var prog = '';
   if (st.running) {
-    prog = '<div class="muted">所有 AI 正在同时思考…已回 ' + st.done + '/' + st.total +
-      (waiting.length ? ('，还在等 ' + waiting.map(function(n){return (n+1)+' 号';}).join('、')) : '') + '</div>';
+    var nowWho = (st.current !== null && st.current !== undefined) ? ((st.current+1) + ' 号正在发言') : '准备中';
+    prog = '<div class="muted">正在依次发言：' + nowWho + '，已完成 ' + st.done + '/' + st.total +
+      (waiting.length ? ('，后面还有 ' + waiting.map(function(n){return (n+1)+' 号';}).join('、')) : '') + '</div>';
   } else if (st.total) {
-    prog = '<div class="muted">上一次：' + st.total + ' 位 Agent 都已收到消息，其中 ' +
-      (st.results||[]).filter(function(r){ return r.say && String(r.say).trim(); }).length + ' 位选择开口。</div>';
+    prog = '<div class="muted">上一次：' + st.total + ' 位 Agent 依次发过言，其中 ' +
+      (st.results||[]).filter(function(r){ return r.say && String(r.say).trim(); }).length + ' 位开口。</div>';
   }
   var last = (st.results||[]).map(function(r){
     var said = (r.say && String(r.say).trim()) ? esc(r.say) : '<span class="muted">（沉默）</span>';
@@ -767,7 +788,7 @@ function roundSection(){
     return '<div><b>' + (r.seat+1) + ' 号</b>：' + said + (r.whispers ? ('（私聊 ' + r.whispers + ' 条）') : '') + err + '</div>';
   }).join('');
   return '<div class="section"><h3>AI 玩家</h3>'+
-    '<p class="muted">你每发一条公开消息，所有 AI 都会同时收到，各自决定接不接话。白天夜里都能说话。</p>'+
+    '<p class="muted">你发一条公开消息后，AI 会按座位顺序一位一位地接话：后说的人能听到前面说了什么，所以彼此能顺着聊。每位自己决定接不接。白天夜里都能说话。</p>'+
     '<div class="row"><button onclick="roundSectionStart()" '+(st.running?'disabled':'')+'>让 AI 自己聊一轮</button>'+
     '<label class="muted"><input type="checkbox" '+(S.autoChat?'checked':'')+' onchange="S.autoChat=this.checked;savePrefs()"> 进入白天时自动讨论</label></div>'+
     prog+
@@ -832,6 +853,32 @@ function syncMeFromGame(g){
   S.me = { zone:'spectator', seat:0 };
 }
 /* 只重画聊天记录：输入时也能看到新消息，不销毁输入框 */
+/* @ 提及候选：座位名 + 说书人。用原生 datalist，输入 @ 后浏览器会给候选 */
+function mentionListHtml(g){
+  if(!g) return '';
+  var opts = (g.seats||[]).map(function(s,i){
+    var nm = s.name||('座位'+(i+1));
+    return '<option value="@'+esc(nm)+'">'+esc((i+1)+' 号')+'</option>';
+  }).join('');
+  return '<datalist id="mentionList">'+opts+'</datalist>';
+}
+/* 点座位名时把「@名字」插到输入框光标处 */
+function insertMention(name){
+  var inp = document.getElementById('chatText');
+  var cur = S.chatDraft || '';
+  var add = '@' + name + ' ';
+  if (inp && typeof inp.selectionStart === 'number'){
+    var a = inp.selectionStart, b = inp.selectionEnd;
+    cur = cur.slice(0,a) + add + cur.slice(b);
+    S.chatDraft = cur;
+    render(true);
+    var ni = document.getElementById('chatText');
+    if (ni) { ni.focus(); try { ni.setSelectionRange(a+add.length, a+add.length); } catch(e){} }
+    return;
+  }
+  S.chatDraft = cur + add;
+  render(true);
+}
 function chatMsgsHtml(g){
   if(!g) return '<div class="muted">暂无消息</div>';
   var seats = g.seats||[];
@@ -843,7 +890,7 @@ function chatMsgsHtml(g){
     if (m.channel==='private' && m.to && m.to.length){
       toTxt = ' → ' + m.to.map(function(x){ return (x+1)+' 号'+(seats[x]?('·'+seats[x].name):''); }).join('、');
     }
-    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+toTxt+'：'+esc(m.text)+'</div>';
+    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+toTxt+'：'+hlMentions(esc(m.text))+'</div>';
   }).join('');
   return h || '<div class="muted">暂无消息</div>';
 }
@@ -873,9 +920,9 @@ function chatPanel(g){
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
     '<div id="chatLog" class="log chatlog" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
     (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
-    '<div class="row chatinput"><input id="chatText" style="flex:1" placeholder="说点什么..." value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
+    '<div class="row chatinput"><input id="chatText" list="mentionList" style="flex:1" placeholder="说点什么…（输入 @ 可以直接 @人）" value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
+    mentionListHtml(g)+
     '<div id="chatMore" class="chatmore" onclick="jumpChatBottom()" style="display:none"></div>'+
-    '<p class="chatnote muted">AI 玩家的发言进度在右侧「魔典」页。</p>'+
     '</div>';
 }
 async function sendChat(){
@@ -947,6 +994,10 @@ async function openGame(id){
   } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }
 }
 function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; render(); }
+/* 把「@名字」包成高亮标签。输入必须是已经转义过的文本。 */
+function hlMentions(escaped){
+  return String(escaped||'').replace(/@([^\s@<,，.。！？!?、：:；;"'）)】\]]{1,16})/g, '<span class="mention">@$1</span>');
+}
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtWiki(raw){
   var t = String(raw||'');

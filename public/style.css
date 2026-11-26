@@ -165,9 +165,13 @@ body.night .inboxitem{background:#12102a}
   .chatcol{min-height:260px}
 /* 头像上方的发言气泡：公聊浅色，私聊紫色 */
 .bubbles{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);width:150px;max-height:96px;overflow:hidden;display:flex;flex-direction:column-reverse;gap:3px;margin-bottom:4px;pointer-events:none;z-index:5}
-.bubble{font-size:11px;line-height:1.45;padding:4px 6px;border-radius:8px;background:#241d15;border:1px solid #4a3c28;color:#e8dcc0;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.5);word-break:break-word;max-height:44px;overflow:hidden}
+.bubble{font-size:11px;line-height:1.38;padding:4px 6px;border-radius:8px;background:#241d15;border:1px solid #4a3c28;color:#e8dcc0;text-align:left;box-shadow:0 2px 6px rgba(0,0,0,.5);word-break:break-word;max-height:46px;overflow:hidden;transition:font-size .12s}
+.bubble.clipped::after{content:"…";opacity:.6}
+.bubbles.stbub{width:160px}
 .bubble.dm{background:#3a2f5c;border-color:#7a68d8;color:#ece6ff}
 .bubble .dmtag{display:inline-block;font-size:9px;font-weight:900;color:#0f0b1e;background:#9c8fe0;border-radius:4px;padding:0 4px;margin-right:3px;vertical-align:1px}
 .bubble .dmto{color:#b9aef0}
 body.night .bubble{background:#191634;border-color:var(--edge2);color:#ded7ff}
 body.night .bubble.dm{background:#2d2350;border-color:#8f7fd8}
+.mention{color:#ffd479;font-weight:700;background:rgba(255,212,121,.10);border-radius:3px;padding:0 1px}
+body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
