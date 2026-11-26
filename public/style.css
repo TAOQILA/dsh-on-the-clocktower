@@ -233,7 +233,8 @@ body.night *::-webkit-scrollbar-thumb:hover{background:#4b3f7d;background-clip:c
 .dmfab:hover{filter:brightness(1.12)}
 .dmfab.on{background:#231b3f;border-color:#7a68d8;color:#cfc6ff}
 .dmcol{position:absolute;inset:34px 0 0 0;display:flex;flex-direction:column;min-height:0;gap:6px;padding:10px;border:1px solid #7a68d8;border-radius:10px;background:rgba(20,16,32,calc(.55 + .42 * var(--panel-alpha)));box-shadow:0 10px 30px rgba(0,0,0,.65);backdrop-filter:blur(3px)}
-.dmhead{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:900;color:#cfc6ff}
+.dmhead{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:900;color:#cfc6ff;flex-wrap:wrap}
+.dmnighttip{font-size:12px;font-weight:400;color:var(--muted,#b9a98a);margin-left:2px}
 .dmhead .dmclose{margin-left:auto;background:transparent;border:1px solid #7a68d8;color:#cfc6ff;border-radius:8px;padding:2px 9px;font-size:13px;cursor:pointer}
 .dmhead .dmclose:hover{background:#3a2f5c}
 .dmwho{font-size:12px;color:#a99be0;margin:0}
@@ -246,7 +247,7 @@ body.night .dmtab.on{background:#7a68d8;border-color:#b7a9ff;color:#0b0a14}
 .dmtarget{display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap}
 .dmtarget input{margin:0}
 .dmcol .log.dmlog{flex:1 1 auto;min-height:80px;max-height:none;overflow:auto;background:#100d1e;border:1px solid #2f2750}
-.dmcol .chatinput input{font-size:15px;padding:8px 10px}
+.dmcol .chatinput input{font-size:16px;padding:10px 12px}.dmcol .chatinput button{font-size:15px}
 body.night .dmcol{background:rgba(12,10,26,.97);border-color:#5b4a9e}
 /* ---- @ 候选：只在输入未闭合的 @ 时出现 ---- */
 .mentionpop{position:relative;display:none;z-index:16;flex-wrap:wrap;gap:4px;margin:4px 0 0;padding:6px;border:1px solid #6b5a3e;border-radius:8px;background:#1b1610;box-shadow:0 6px 18px rgba(0,0,0,.6)}

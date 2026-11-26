@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.11.7';
+var VERSION = '0.11.8';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -336,7 +336,7 @@ function render(force){
   var vw = Math.max(320, window.innerWidth);
   var sideW = Math.min(440, Math.round(vw * 0.40));
   var chatW = Math.min(460, Math.round(vw * 0.44));
-  var dmW = Math.min(380, Math.round(vw * 0.38));
+  var dmW = chatW; /* 私聊与公聊同宽 */
   var HAN = 30; /* 抽屉拉手宽度 + 间距 */
   var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
   /* 主面板内容 */
@@ -1313,11 +1313,11 @@ function dmPanel(g){
     who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
   }
   var whoTargets = night ? (selfIdx !== -1 ? '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>' : '') : who;
-  return '<div class="dmcol"><div class="dmhead"><b>私聊</b>'
-    + '<button class="dmclose" onclick="toggleDm()" title="收起私聊">×</button></div>'
+  var nightTip = (night && !ro) ? '<span class="dmnighttip">夜晚禁止玩家间私聊，只可与说书人私聊。</span>' : '';
+  return '<div class="dmcol"><div class="dmhead"><b>私聊</b>' + nightTip + '</div>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
       : (night
-        ? '<p class="muted">夜晚禁止玩家间私聊，只可与说书人私聊。</p>' + '<div class="dmwho">私聊对象：<div class="dmtargets">' + whoTargets + '</div></div>'
+        ? '<div class="dmwho">私聊对象：<div class="dmtargets">' + whoTargets + '</div></div>'
         : '<div class="dmwho">私聊对象：<div class="dmtargets">' + who + '</div></div>'))
     + '<div id="dmLog" class="log chatlog dmLog">' + chatMsgsHtml(g, 'private') + '</div>'
     + (ro ? ''
