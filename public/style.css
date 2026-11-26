@@ -150,8 +150,7 @@ body.night .deadnote{color:#c98f8f}
 .inboxitem.secret{border-left-color:#b07c7c}
 body.night .inboxitem{background:#12102a}
 .smname-input{flex:1;min-width:120px;font-size:12px;padding:3px 6px}
-.neturl{font-family:Consolas,Monaco,monospace;font-size:13px;padding:5px 8px;margin-bottom:5px;background:#1b1610;border:1px solid #4a3c28;border-radius:5px;word-break:break-all}
-body.night .neturl{background:#12102a;border-color:var(--edge2)}
+
 /* 手机竖屏：单列堆叠，聊天垫到最下面 */
 @media (max-width:760px){
   header{padding:8px 12px;gap:8px;flex-wrap:wrap}

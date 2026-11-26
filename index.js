@@ -18,7 +18,7 @@
  * 使用用户在 DSH 里已配置的模型。同源路由自动跟随宿主端口，无需记固定端口。
  * client 面板的「在浏览器中打开魔典」按钮即指向该同源地址。
  *
- * 若宿主不提供 webServer，退回在 BOTC_PORT（默认 6325）独立启服务兜底。
+ * 若宿主不提供 webServer，退回在 RAN_PORT（默认 6325）独立启服务兜底。
  */
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
@@ -29,9 +29,9 @@ import fs from 'node:fs'
 export const inject = []
 
 const MOUNT = '/dsh-on-the-clocktower'
-const PORT = Number(process.env.BOTC_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
+const PORT = Number(process.env.RAN_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
 const MAX_TOKENS = 1200
-const VERSION = '0.8.1'
+const VERSION = '0.8.2'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -190,7 +190,7 @@ function applyInner(ctx) {
   try {
     const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : null
     if (webServer && typeof webServer.register === 'function') {
-      const route = { kind: 'prefix', path: MOUNT, handler: mod.makeHandler({ llmCall, listModels, port: PORT, host: String(process.env.BOTC_HOST || '127.0.0.1') }, MOUNT) }
+      const route = { kind: 'prefix', path: MOUNT, handler: mod.makeHandler({ llmCall, listModels }, MOUNT) }
       if (typeof ctx.effect === 'function') ctx.effect(() => webServer.register(route))
       else webServer.register(route)
       mounted = true
@@ -200,15 +200,11 @@ function applyInner(ctx) {
     log('血染钟鱼：同源挂载失败 ' + String((err && err.message) || err))
   }
 
-  // 2) 固定端口服务：始终启动（BOTC_PORT，默认 6325），带 ctx.llm 桥。
+  // 2) 固定端口服务：始终启动（RAN_PORT，默认 6325），带 ctx.llm 桥。
   {
-    const HOST = String(process.env.BOTC_HOST || '127.0.0.1')
-    Promise.resolve(mod.serve({ port: PORT, host: HOST, llmCall, listModels })).then(function (result) {
+    Promise.resolve(mod.serve({ port: PORT, llmCall, listModels })).then(function (result) {
       if (result && result.ok) {
-        log('血染钟鱼：魔典已就绪 http://127.0.0.1:' + PORT + (result.reused ? '（端口已有服务，直接复用）' : '') + (result.lan ? '，已开放局域网访问' : ''))
-        if (result.lan && Array.isArray(result.urls) && result.urls.length) {
-          result.urls.forEach(function (u) { log('血染钟鱼：手机可用地址 ' + u) })
-        }
+        log('血染钟鱼：魔典已就绪 http://127.0.0.1:' + PORT + (result.reused ? '（端口已有服务，直接复用）' : ''))
         if (result.server && typeof ctx.effect === 'function') {
           // effect 会立即执行回调，返回的函数才是 disposer —— 必须返回关闭函数，不能直接关。
           ctx.effect(() => () => { try { result.server.close() } catch {} })

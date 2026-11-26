@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.8.1';
+var VERSION = '0.8.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], net:null, chatDraft:'', pendingRender:false, autoChat:true, lastPhase:'' };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, lastPhase:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'建局',ai:'AI 设置',game:'游戏',story:'说书人',log:'日志',wiki:'知识库'};
@@ -31,7 +31,6 @@ window.addEventListener('resize', function(){ if (typeof placeMe === 'function')
 async function init(){
   try { S.models = await api('models'); } catch(e){ S.models = {providers:[],error:String(e&&e.message||e)}; }
   try { var np = await api('names'); S.namesPool = Array.isArray(np) ? np : []; } catch(e2){ S.namesPool = []; }
-  try { S.net = await api('net'); } catch(e3){ S.net = null; }
   S.scripts = await api('scripts');
   if (!S.scripts.length){ $('#app').innerHTML='<p style="padding:30px">未找到剧本 JSON，请检查 data/scripts/</p>'; return; }
   S.script = S.scripts[0];
@@ -41,7 +40,7 @@ async function init(){
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); }
 /* 建局偏好落盘：刷新页面后座位名/模型、说书人模型、剧本都还在 */
-var PREF_KEY = 'botc.prefs.v1';
+var PREF_KEY = 'ran.prefs.v1';
 function savePrefs(){
   try {
     localStorage.setItem(PREF_KEY, JSON.stringify({
@@ -396,8 +395,7 @@ function setupPanel(){
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
     '<p class="muted">默认每个人都是 AI。把「你」放到某个座位，你就成为那位玩家；放到说书人圆圈，你就当说书人；放到旁观席，你就只是看。其余座位都由 Agent 扮演。</p>'+
     '</div><div class="seatlist">'+pills+'</div>'+
-    nickPanel(S.seats)+
-    netPanel();
+    nickPanel(S.seats);
 }
 /* 昵称配置：只在建局页，负责「这个座位叫什么」 */
 function nickPanel(seats){
@@ -413,21 +411,6 @@ function nickPanel(seats){
     '<div class="row"><button onclick="randomizeNames()">随机全局昵称</button>'+
     '<span class="muted">从 data/names.json 的 '+nickPool().length+' 个昵称里随机分配。</span></div>'+
     '<div class="smgrid">'+rows+'</div></div>';
-}
-/* 手机/同网络访问提示：服务若监听 0.0.0.0，这里会列出局域网地址 */
-function netPanel(){
-  var n = S.net;
-  if (!n) return '';
-  if (!n.lan) {
-    return '<div class="section"><h3>手机访问</h3>'+
-      '<p class="muted">当前服务只允许本机访问。要让同一 Wi-Fi 下的手机打开魔典，'+
-      '请以环境变量 BOTC_HOST=0.0.0.0 重启 DSH，然后回到本页查看地址。</p></div>';
-  }
-  var urls = (n.urls||[]).map(function(u){ return '<div class="neturl">'+esc(u)+'</div>'; }).join('');
-  return '<div class="section"><h3>手机访问</h3>'+
-    '<p class="muted">手机连同一个 Wi-Fi，用浏览器打开下面任一地址即可（电脑和手机要在同一网段）：</p>'+
-    (urls || '<p class="muted">没找到局域网地址。</p>')+
-    '<p class="muted">注意：魔典没有登录验证，同一网络里的人都能打开并操作；玩完请关掉 DSH。</p></div>';
 }
 /* AI 设置页：每个座位用什么模型 */
 function aiPanel(seats,sel){

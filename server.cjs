@@ -16,7 +16,6 @@
  * 后者会注入 llmCall，使 Agent 直接使用 DSH 已配置的模型，无需任何额外配置。
  */
 const http = require('http');
-const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const E = require('./engine.cjs');
@@ -35,22 +34,6 @@ function body(req){ return new Promise(ok=>{ let b=''; req.on('data',c=>b+=c); r
 function buildApi(opts){
   opts = opts || {};
   return {
-  /* 手机访问用：当前监听范围 + 本机局域网 IPv4 地址，前端用来提示「用哪个地址打开」 */
-  net: () => {
-    const host = String(opts.host || process.env.BOTC_HOST || '127.0.0.1');
-    const lan = (host === '0.0.0.0' || host === '::');
-    const port = Number(opts.port || process.env.PORT || 6325);
-    const urls = [];
-    if (lan) {
-      const nets = os.networkInterfaces();
-      Object.keys(nets).forEach(function (k) {
-        (nets[k] || []).forEach(function (n) {
-          if (n && n.family === 'IPv4' && !n.internal) urls.push('http://' + n.address + ':' + port + '/');
-        });
-      });
-    }
-    return { lan: lan, host: host, urls: urls };
-  },
   scripts: () => {
     const d = path.join(ROOT,'data','scripts');
     return fs.readdirSync(d).filter(f=>f.endsWith('.json')).map(f=>JSON.parse(fs.readFileSync(path.join(d,f),'utf8')));
@@ -182,22 +165,10 @@ function serve(opts){
       if (err && err.code === 'EADDRINUSE') resolve({ ok:true, port:PORT, reused:true, server:null });
       else resolve({ ok:false, port:PORT, error:String(err && err.message || err) });
     });
-    const HOST = String(opts.host || process.env.BOTC_HOST || '127.0.0.1');
-    server.listen(PORT, HOST, function(){
+    server.listen(PORT, '127.0.0.1', function(){
       const mode = (A.hasLlm()?'llm':(process.env.AGENT_ENDPOINT?'endpoint':'mock'));
-      const lan = (HOST === '0.0.0.0' || HOST === '::');
-      const urls = [];
-      if (lan) {
-        const nets = os.networkInterfaces();
-        Object.keys(nets).forEach(function(k){
-          (nets[k] || []).forEach(function(n){
-            if (n && n.family === 'IPv4' && !n.internal) urls.push('http://'+n.address+':'+PORT+'/');
-          });
-        });
-      }
       console.log('血染钟鱼 running at http://127.0.0.1:'+PORT+' ('+mode+')');
-      urls.forEach(function(u){ console.log('血染钟鱼 局域网地址：'+u); });
-      resolve({ ok:true, port:PORT, server:server, reused:false, host:HOST, lan:lan, urls:urls });
+      resolve({ ok:true, port:PORT, server:server, reused:false });
     });
   });
 }

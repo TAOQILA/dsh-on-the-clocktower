@@ -38,7 +38,7 @@ window.__ModuleLoader__.load({
       }, '染')
     }
 
-    function BotcPanel() {
+    function RanPanel() {
       const open = function () {
         try { window.open(BASE, '_blank', 'noopener,noreferrer') }
         catch (e) { window.location.href = BASE }
@@ -71,7 +71,7 @@ window.__ModuleLoader__.load({
     const inject = ['slots']
     function apply(ctx) {
       ctx.slots.inject('main', () =>
-        ctx.slots.register({ name: 'main', key: 'dsh-on-the-clocktower' }, BotcPanel),
+        ctx.slots.register({ name: 'main', key: 'dsh-on-the-clocktower' }, RanPanel),
       )
       ctx.slots.inject('sidebar.panellist', () =>
         ctx.slots.register(
