@@ -95,6 +95,11 @@ function setPhase(id, phase){
   if (!PHASES.includes(phase)) return {ok:false,error:'未知阶段'};
   if (phase==='night' && s.phase==='dawn'){ s.night++; }
   if (phase==='day' && s.phase==='night'){ s.day++; }
+  /* 白天计时：进入白天时打点，进入夜晚清空。前端据此显示「今天已过多少分钟」 */
+  if (phase==='day') { if (!s.dayStarted) s.dayStarted = new Date().toISOString(); }
+  else if (phase==='night') { s.dayStarted = null; }
+  /* 换阶段时上一轮投票作废 */
+  if (phase!=='day') s.vote = null;
   s.phase=phase; s.turn++;
   saveState(id,s); log(id,'系统','进入阶段：'+phase+(phase==='night'?'（第'+s.night+'夜）':''));
   return {ok:true,state:s};
@@ -110,6 +115,9 @@ function giveInfo(id, seat, text){
   const s = loadState(id);
   /* night/day 记录发放时刻：夜里得到的信息，要到下一个白天才能公开讨论 */
   (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text, night:s.night, day:s.day, phase:s.phase});
+  /* 说书人的信息由说书人「亲自私聊」发给该座位：直接落一条 private 消息（不走 say()，因为夜里私聊通道对玩家关闭，说书人下发信息不受此限） */
+  if (!Array.isArray(s.messages)) s.messages = [];
+  s.messages.push({ t:new Date().toISOString(), from:'storyteller', channel:'private', to:[seat], text:String(text||'') });
   /* 若信息里写明「你的角色是【X】」，顺手把角色落到 roles，保证身份面板/胜负判定/夜间顺序一致 */
   const m = String(text||'').match(/你的角色是[【\[]([^】\]]+)[】\]]/);
   if (m && m[1] && !s.roles[seat]) { s.roles[seat] = m[1].trim(); }
@@ -151,6 +159,49 @@ function execute(id, seat){
   const w = checkWin(id);
   return {ok:true, win:w};
 }
+/* ---------- 白天的提名与处决投票 ----------
+   openVote：说书人（或玩家）宣布「现在开始对某人的处决投票」
+   castVote：每个存活座位表态 yes / no
+   resolveVote：计票并结算——赞成多于反对且赞成票数达到存活人数的一半才处决 */
+function openVote(id, target){
+  const s = loadState(id);
+  const t = Number(target);
+  if (!(t >= 0 && t < s.seats.length)) return {ok:false, error:'目标座位越界'};
+  if (!s.alive[t]) return {ok:false, error:'该座位已经死亡'};
+  s.vote = { target:t, open:true, t0:new Date().toISOString(), yes:[], no:[] };
+  saveState(id,s);
+  log(id,'说书人','发起处决投票：目标 '+(t+1)+' 号 '+s.seats[t].name);
+  return {ok:true, vote:s.vote};
+}
+function castVote(id, seat, yes){
+  const s = loadState(id);
+  if (!s.vote || !s.vote.open) return {ok:false, error:'现在没有进行中的投票'};
+  if (!s.alive[seat]) return {ok:false, error:'死者没有投票权'};
+  s.vote.yes = s.vote.yes.filter(function(x){ return x!==seat; });
+  s.vote.no  = s.vote.no.filter(function(x){ return x!==seat; });
+  (yes ? s.vote.yes : s.vote.no).push(seat);
+  saveState(id,s);
+  agentLog(id,seat,'actions',{kind:'vote_execute',target:s.vote.target,yes:!!yes});
+  return {ok:true, yes:s.vote.yes.length, no:s.vote.no.length};
+}
+function resolveVote(id){
+  const s = loadState(id);
+  if (!s.vote || !s.vote.open) return {ok:false, error:'现在没有进行中的投票'};
+  const alive = s.seats.filter(function(x,i){ return s.alive[i]; }).length;
+  const yes = s.vote.yes.length, no = s.vote.no.length;
+  const target = s.vote.target;
+  s.vote.open = false; s.vote.yesCount = yes; s.vote.noCount = no; s.vote.aliveCount = alive;
+  const pass = (yes > no) && (yes * 2 >= alive);
+  s.vote.passed = pass;
+  saveState(id,s);
+  if (pass) {
+    log(id,'系统','投票结果：'+(target+1)+' 号 '+s.seats[target].name+' 被处决（赞成 '+yes+' / 反对 '+no+'）');
+    return execute(id, target);
+  }
+  log(id,'系统','投票未通过：'+(target+1)+' 号 '+s.seats[target].name+' 未被处决（赞成 '+yes+' / 反对 '+no+'）');
+  return {ok:true, executed:false, yes, no, alive};
+}
+
 /* 夜间死亡（非处决）：与处决分开记账，避免日志写错 */
 function kill(id, seat, reason){
   const s = loadState(id);
@@ -233,9 +284,12 @@ function say(id, seat, text, channel, to){
   const msg = { t:new Date().toISOString(), from:seat, channel:ch, to:targets, text:String(text||'') };
   s.messages.push(msg);
   saveState(id,s);
-  const who = s.seats[seat]?s.seats[seat].name:'#'+seat;
+  /* from / to 都可能是 'storyteller'：说书人不是座位，没有 seats[i] */
+  const seatName = (x) => (x==='storyteller') ? ((s.storyteller&&s.storyteller.name)||'说书人')
+                       : (s.seats[x] ? s.seats[x].name : ('#'+x));
+  const who = seatName(seat);
   if (ch==='town') log(id, who, '[公开发言] '+msg.text);
-  else log(id, '系统', who+' 私聊了 '+targets.map(x=>s.seats[x]?s.seats[x].name:'#'+x).join('、')+'（内容仅当事人可见）');
+  else log(id, '系统', who+' 私聊了 '+targets.map(seatName).join('、')+'（内容仅当事人可见）');
   if (s.seats[seat] && s.seats[seat].type==='agent') agentLog(id,seat,'speech',{channel:ch,to:targets,text:msg.text});
   targets.forEach(function(x){
     if (s.seats[x] && s.seats[x].type==='agent') agentLog(id,x,'actions',{kind:'dm_received',from:seat,text:msg.text});
@@ -284,4 +338,4 @@ function createAndStart(cfg){
 
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
-  agentLog, gameDir, checkWin, endGame, roleFaction };
+  agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote };

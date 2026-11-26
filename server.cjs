@@ -83,7 +83,12 @@ function buildApi(opts){
   role: (b) => { const r = E.assignRole(b.id,b.seat,b.role); A.clearKnowledge(b.id); return r; },
   info: (b) => E.giveInfo(b.id,b.seat,b.text),
   speak: (b) => E.speak(b.id,b.seat,b.text),
-  say: (b) => E.say(b.id, b.seat, b.text, b.channel, b.to),
+  say: (b) => {
+    const r = E.say(b.id, b.seat, b.text, b.channel, b.to);
+    /* 每条公聊 / 私聊都同步交给 Agent 说书人思考一次：它可以开口，也可以沉默 */
+    if (r && r.ok && r.message) { try { A.storyReply(b.id, r.message); } catch (e) {} }
+    return r;
+  },
   messages: (b) => ({ messages: E.messages(b.id, b.viewer, !!b.storyteller) }),
   think: (b) => E.think(b.id,b.seat,b.text),
   nominate: (b) => E.nominate(b.id,b.from,b.target),
@@ -109,6 +114,10 @@ function buildApi(opts){
   roundStatus: (b) => A.status(b.id),
   /* 说书人 Agent：主持夜间流程 */
   storyRound: (b) => A.runStoryteller(b.id, b),
+  openVote: (b) => E.openVote(b.id, b.target),
+  castVote: (b) => E.castVote(b.id, b.seat, b.yes !== false),
+  resolveVote: (b) => E.resolveVote(b.id),
+  storyChat: (b) => A.storyReply(b.id, b.msg),
   storyStatus: (b) => A.storyStatus(b.id),
   agentSpeak: async (b) => {
     const s = E.loadState(b.id);

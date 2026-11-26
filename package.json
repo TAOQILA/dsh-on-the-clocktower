@@ -1,6 +1,6 @@
 {
   "name": "dsh-on-the-clocktower",
-  "version": "0.8.9",
+  "version": "0.10.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "DSH on the Clocktower —— 血染钟鱼：在 DSH 里与 Agent 同玩",

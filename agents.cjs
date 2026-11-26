@@ -131,9 +131,21 @@ function playerSystem(id, seat){
     + (ri ? ('\n阵营：' + (ri.faction_zh||ri.faction) + '\n能力原文：' + ri.ability) : '')
     + (own ? ('\n你的角色详情：\n' + own) : ''), SYSTEM_CLIP);
 }
+/* 天平系统：说书人的核心职责之一。写进 system，每一夜/每一天都生效。 */
+const BALANCE_RULES = [
+  '【天平系统 · 说书人的最高职责之一】',
+  '你不只是在执行规则，你也是这一局的平衡者。每一夜、每一天开始前，先在心里称一次天平：善良方和邪恶方，现在谁更弱？',
+  '天平的两端不是人数，而是「离胜利还有多远」：善良方弱＝好人接连被冤杀、关键信息被浪费、恶魔几乎没人怀疑；邪恶方弱＝爪牙被拔、恶魔被锁定、邪恶方几乎没有翻盘空间。',
+  '你要用规则允许你裁量的部分去扶弱：凡是能力描述里带「可能」「由你决定」「你可以」「选择」这类裁量空间的，都优先向弱势的一方倾斜。',
+  '例如：信息类能力可以给出更清晰、更有指向性的线索给弱势方；干扰类能力（中毒、醉酒、错误信息）可以少用或不用在已经领先的一方身上；死亡与复活的裁定可以给弱势方留一口气。',
+  '绝对不能做的事：直接说出谁是什么角色；凭空捏造规则不允许的信息；因为偏爱某一方而违反角色能力的明文描述。天平只能在规则给的裁量空间里倾斜。',
+  '开局时通常邪恶方是弱势的（人少、信息少、要隐藏），所以第一夜的处理一般应当对邪恶方稍微宽松一点，给它们留出表演空间；但一旦邪恶方开始滚雪球，就要立刻反向倾斜。',
+  '每一夜/每一天的 think 里，先用一句话写清「当前天平偏向哪一方、为什么」，再写你的裁定。'
+].join('\n');
+
 function storytellerSystem(id){
   const kb = gameKnowledge(id);
-  return clip(RULES + '\n\n' + READING_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
+  return clip(RULES + '\n\n' + READING_RULES + '\n\n' + BALANCE_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
     + '\n\n本剧本：' + (kb.scriptText||'')
     + '\n\n本剧本全部角色能力原文：\n' + kb.roleDetail, ST_SYSTEM_CLIP);
 }
@@ -196,7 +208,7 @@ function viewForStoryteller(id) {
     storyteller: true,
     seats: s.seats.map(function (x, i) {
       return {
-        seat: i, name: x.name, type: x.type, alive: !!s.alive[i], role: s.roles[i] || null,
+        seat: i, name: x.name, alive: !!s.alive[i], role: s.roles[i] || null,
         markers: s.markers[i] || [], info: (s.info[i] || [])
       };
     }),
@@ -207,11 +219,12 @@ function viewForStoryteller(id) {
 
 /* ---------- 提示词 ---------- */
 const RULES = [
-  '你在玩一款社交推理游戏「血染钟鱼」，与人类玩家及其他 AI 玩家同桌。',
+  '你在玩一款社交推理游戏「血染钟鱼」，与同一张桌子上的其他玩家一起游玩。',
   '游戏分夜晚与白天：夜晚角色秘密行动，白天全员公开讨论、提名、投票处决。',
   '你只知道自己的角色和说书人私下告诉你的信息；不要编造自己没有的信息。',
-  '不要提及「提示词」「模型」「AI 系统」等元信息，像真人玩家一样说话。',
-  '指代任何一位玩家时必须写成「@名字」，例如「我觉得 @长庚 有问题」。不要只用座位号，也不要只写名字而不带 @。'
+  '不要提及「提示词」「模型」「AI」「机器人」等元信息，像普通玩家一样说话。',
+  '指代任何一位玩家时必须写成「@名字」，例如「我觉得 @长庚 有问题」。不要只用座位号，也不要只写名字而不带 @。',
+  '称呼你自己时用「我」，不要 @ 自己，也不要用第三人称说自己。'
 ].join('\n');
 
 function renderMessages(msgs, seats) {
@@ -279,9 +292,10 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('say 必须非空：哪怕只是应付一句、反问一句、或者表明态度，也要回话，不要留空。whisper 留空数组即可。');
   } else if (mode === 'react') {
     lines.push('刚才场上有人公开发言（见上方对话最后几条）。');
-    lines.push('默认应该接一句：表明态度、提出怀疑、附议别人、给出你的信息，或为自己辩护。');
-    lines.push('只有在确实无话可说时才沉默：say 写空字符串 ""。沉默太多会让场上没人讨论，对好人不利。');
-    lines.push('不要复述别人刚说过的话；一句话就够，不要长篇大论。');
+    lines.push('先判断这条消息和你有没有关系：被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那必须接话。');
+    lines.push('如果和你没什么关系，多数时候不用接：say 写空字符串 "" 就好。一条消息不需要一群人都来回应。');
+    lines.push('要接的话只说一句：表明态度、提出怀疑、附议别人、给出你的信息，或为自己辩护。');
+    lines.push('不要复述别人刚说过的话；不要长篇大论。');
     if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
     else lines.push('想单独问谁就私聊谁（whisper），不限次数；但别刷屏，一两句说清楚。');
   } else {
@@ -298,14 +312,27 @@ function buildStorytellerNightPrompt(id) {
   const lines = [];
   lines.push('你是「血染钟鱼」的说书人（Storyteller），本局由你全权主持。');
   lines.push('重要：本程序中角色能力没有任何执行代码，全部由你依据游戏规则判断并落实。你决定夜里唤醒谁、他们看到什么、谁死亡、谁中毒或醉酒。');
-  lines.push('你必须公正：不偏袒任何阵营，不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
+  lines.push('你必须公正：不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
+  lines.push('但公正不等于机械：你是这一局的天平。每一夜先称一次天平，判断善良方与邪恶方谁更弱，再用能力描述里留给你的裁量空间（「可能」「由你决定」「你可以选择」）去扶弱的一方。开局时邪恶方通常更弱。');
+  lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），你必须先私聊问 ta 想选谁，等 ta 回复后再结算；不能自己替他挑。');
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
+  const stt = E.loadState(id);
+  const mins = stt && stt.dayStarted ? Math.max(0, Math.round((Date.now() - new Date(stt.dayStarted).getTime()) / 60000)) : 0;
+  lines.push('【白天已经过去】' + mins + ' 分钟');
+  if (stt && stt.vote) {
+    lines.push('【当前投票】目标 ' + (stt.vote.target + 1) + ' 号 ' + (stt.seats[stt.vote.target] || {}).name
+      + (stt.vote.open ? '（进行中：赞成 ' + stt.vote.yes.length + ' / 反对 ' + stt.vote.no.length + '）'
+                       : '（已结束：' + (stt.vote.passed ? '通过' : '未通过') + '，赞成 ' + (stt.vote.yesCount || 0) + ' / 反对 ' + (stt.vote.noCount || 0) + '）'));
+  } else {
+    lines.push('【当前投票】没有进行中的投票');
+  }
+  lines.push('【关于提名处决】你不必急着投票。先听大家讨论：当有人提出了值得表决的指控、讨论已经充分、或者白天拖得太久（比如超过 10 分钟）没人推进，你就发起对某人的处决投票（见输出字段 voteTarget）。投票要按规则来：只有存活玩家有票，赞成必须多于反对且赞成票达到存活人数的一半才算通过。公告结果时如实说明票数与是否处决。');
   lines.push('');
   lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）');
   v.seats.forEach(function (x) {
-    lines.push((x.seat+1) + ' 号：' + x.name + '（' + (x.type === 'human' ? '玩家' : 'Agent')
-      + (x.alive ? '，存活' : '，已死亡') + '）角色=' + (x.role || '未分配')
+    lines.push((x.seat+1) + ' 号：' + x.name
+      + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配')
       + (x.markers.length ? (' 标记=' + x.markers.join(',')) : '')
       + (x.info.length ? (' 已告知：' + x.info.map(function (i) { return i.text; }).join(' | ')) : ''));
   });
@@ -315,8 +342,9 @@ function buildStorytellerNightPrompt(id) {
   lines.push('');
   lines.push('【你这一夜要做的】');
   lines.push('1. 按标准夜间唤醒顺序依次处理本局存在的角色（先爪牙获取信息，再特定角色，最后恶魔行动）。');
-  lines.push('2. 逐个决定该角色获得什么信息或做出什么选择，把需要私下告知的内容写出来。');
-  lines.push('3. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等）。');
+  lines.push('2. 逐个决定该角色获得什么信息；如果某个能力需要该玩家自己选目标，先用 info 里对该座位发一条「请告诉我你想选择谁」的私聊，本轮先不结算这个角色，等 ta 回复后再结算。');
+  lines.push('3. 把需要私下告知的内容写出来。');
+  lines.push('4. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等），并按天平系统决定这次的裁量往哪边偏。');
   lines.push('');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的裁判思路（不公开）","say":"你要对全场公开说的话，没有就空字符串",');
@@ -333,6 +361,7 @@ function buildStorytellerDayPrompt(id) {
   lines.push('你是「血染钟鱼」的说书人。现在是白天，玩家们正在公开讨论、提名与投票。');
   lines.push('你要做的是：观察讨论、必要时提醒规则、在投票结束后公布结果、决定是否有人被处决。');
   lines.push('不要替玩家做决定，也不要暗示谁好谁坏。');
+  lines.push('但记得天平：白天如果你要行使裁量权（是否处决、给什么提示、如何描述死亡），先判断哪一方更弱，把空间留给弱势方。');
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
   lines.push('');
@@ -345,7 +374,8 @@ function buildStorytellerDayPrompt(id) {
   lines.push(renderMessages(v.messages, v.seats));
   lines.push('');
   lines.push('严格只输出一个 JSON 对象：');
-  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"nextPhase":""}');
+  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"nextPhase":"","voteTarget":0,"resolveVote":false}');
+  lines.push('voteTarget：要发起处决投票的目标座位号（从 1 开始）；不发起就填 0。resolveVote：为 true 表示现在结算当前这轮投票。');
   return { prompt: lines.join('\n'), view: v };
 }
 
@@ -526,9 +556,79 @@ async function applyOne(id, seat, out, opts, run){
   });
 }
 
+/* ---------- 发言节奏：给玩家留出插嘴的空隙 ----------
+   问题：AI 一位接一位连着说，玩家根本插不进话。
+   做法：
+   1) 每位 Agent 说完之后强制停顿 SPEAK_GAP_MS；
+   2) 如果这一轮开始后玩家（真人座位）说过话，就先停下来等玩家安静下来
+      （连续 QUIET_MS 没新消息）再让下一位开口，最多等 HUMAN_WAIT_MAX_MS；
+   3) 一次「接话」最多 REACT_MAX_SPEAKERS 位先响应，避免一条消息引来全体轰炸。
+   这样玩家不需要手动触发，也能随时把话头抢回来。 */
+const SPEAK_GAP_MS = 4500;
+const QUIET_MS = 9000;
+const HUMAN_WAIT_MAX_MS = 60000;
+const REACT_MAX_SPEAKERS = 3;
+const REACT_EXTRA_SPEAKERS = 1;
+/* 一轮结束后强制静默一段时间，把话头还给玩家；这期间不自动开新一轮 */
+const ROUND_COOLDOWN_MS = 12000;
+let ROUND_LAST_AT = new Map();
+
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+function lastHumanMsgAt(id) {
+  const s = E.loadState(id);
+  const list = Array.isArray(s.messages) ? s.messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    const seat = typeof m.from === 'number' ? s.seats[m.from] : null;
+    if (seat && seat.type === 'human') return Date.parse(m.t) || 0;
+  }
+  return 0;
+}
+
+/* 最近一条真人公开发言里 @ 到 / 点名到的座位（0 起下标） */
+function mentionedSeats(id) {
+  const s = E.loadState(id);
+  const list = Array.isArray(s.messages) ? s.messages : [];
+  let last = null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    const seat = typeof m.from === 'number' ? s.seats[m.from] : null;
+    if (seat && seat.type === 'human') { last = m; break; }
+  }
+  if (!last) return [];
+  let txt = String(last.text || '');
+  const hits = [];
+  /* 长名字优先：先把「长庚二号」认走，免得它又被当成「长庚」；
+     认走的名字在文本里挖掉，短名字就不会再误命中。 */
+  s.seats.map(function (x, i) { return { name: (x && x.name) ? x.name : '', i: i }; })
+    .filter(function (x) { return x.name.length >= 2; })
+    .sort(function (a, b) { return b.name.length - a.name.length; })
+    .forEach(function (x) {
+      if (txt.indexOf(x.name) < 0) return;
+      hits.push(x.i);
+      txt = txt.split(x.name).join('\u0000');
+    });
+  return hits.sort(function (a, b) { return a - b; });
+}
+
+/* 玩家刚说过话就让路：轮询直到玩家安静 QUIET_MS，或总等待超过上限 */
+async function yieldToHuman(id, startedAt) {
+  const t0 = Date.now();
+  for (;;) {
+    const last = lastHumanMsgAt(id);
+    if (last <= startedAt) return;              /* 这一轮里玩家还没说话，不用让 */
+    const quietFor = Date.now() - last;
+    if (quietFor >= QUIET_MS) return;            /* 玩家已经安静够久，可以继续 */
+    if (Date.now() - t0 >= HUMAN_WAIT_MAX_MS) return;
+    await sleep(400);
+  }
+}
+
 /* 一次完整的「思考 -> 说话」。关键点：模型思考的这段时间里如果又有人插话，
-   出来的回答就已经过时了 —— 所以比对消息数，发现有新消息就带上新消息重新思考一次。
-   （只补一次，避免无限续杯；第二次之后即便又有人说话也照常落地。） */
+   出来的回答就已经过时了 —— 所以比对消息数，只要有新消息就一直带着新消息重新思考，
+   直到「一整轮思考期间没有任何人插话」为止 —— 不设次数上限，只要还有人在他思考时
+   插话就一直重想，保证最终说出口的话一定建立在场上最新信息之上。 */
 async function thinkAndSpeak(id, seat, opts) {
   const msgCount = function () {
     const st = E.loadState(id);
@@ -536,24 +636,32 @@ async function thinkAndSpeak(id, seat, opts) {
   };
   const route = routeFor(id, seat);
   const system = playerSystem(id, seat);
-  const n0 = msgCount();
-  let built = buildPrompt(id, seat, opts.replyTo, opts.mode);
-  let out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: system, provider: route.provider, model: route.model });
-  if (out && out.error) return out;
-  const n1 = msgCount();
-  if (n1 > n0) {
-    /* 有人在他思考期间插了话：重建提示词（新消息已在对话里），再想一次 */
-    const built2 = buildPrompt(id, seat, opts.replyTo, opts.mode);
-    const extra = built2.prompt + '\n\n【重要】你刚才思考期间，场上又出现了 ' + (n1 - n0) + ' 条新消息（见上方对话中最新几条）。'
-      + '你之前的想法可能已经不成立了，请结合这些新消息重新判断，再给出你这一轮的回答。';
-    let out2;
+  let out = null;
+  let round = 0;
+  let lastN = msgCount();
+  for (;;) {
+    round++;
+    const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
+    const prompt = (round === 1)
+      ? built.prompt
+      : built.prompt + '\n\n【重要】你上一次思考时，场上又出现了新消息（见上方对话中最新几条）。'
+        + '你之前的想法可能已经不成立了，请结合这些新消息重新判断，再给出你这一轮的回答。';
+    let cur;
     try {
-      out2 = await callModel({ game: id, seat: seat, prompt: extra, system: system, provider: route.provider, model: route.model });
-    } catch (e) { return out; }
-    if (out2 && !out2.error && out2.text) {
-      E.think(id, seat, '（思考期间场上又有 ' + (n1 - n0) + ' 条新消息，已结合新消息重新判断）');
-      return out2;
+      cur = await callModel({ game: id, seat: seat, prompt: prompt, system: system, provider: route.provider, model: route.model });
+    } catch (e) {
+      if (out) break;
+      return { error: String((e && e.message) || e) };
     }
+    if (!cur || cur.error) {
+      if (out) break;
+      return cur;
+    }
+    out = cur;
+    const nowN = msgCount();
+    if (nowN <= lastN) break;
+    lastN = nowN;
+    E.think(id, seat, '（思考期间场上又有新消息，第 ' + round + ' 次结合新消息重新判断）');
   }
   return out;
 }
@@ -574,6 +682,18 @@ async function runRound(id, opts) {
   if (Array.isArray(opts.seats) && opts.seats.length) {
     pool = opts.seats.map(Number).filter(function (n) { return order.indexOf(n) >= 0; });
     if (!pool.length) return { ok: false, error: '指定的座位不可唤醒' };
+  } else if (opts.mode === 'react') {
+    /* 一条消息不该引来全场回应。优先唤醒「这条消息和它有关」的人：
+       被 @ 到 / 被点名的座位必须接话；其余座位最多补 1 位，凑够两三位即可。
+       这样一条消息通常只换回一两句，玩家有的是插话空间。 */
+    const mentioned = mentionedSeats(id);
+    const lead = order.filter(function (n) { return mentioned.indexOf(n) >= 0; });
+    const rest = order.filter(function (n) { return mentioned.indexOf(n) < 0; });
+    /* 上一轮刚结束没多久又被触发时，只让被点到的人回应，避免连珠炮 */
+    const lastAt = ROUND_LAST_AT.get(id) || 0;
+    const extra = (Date.now() - lastAt < ROUND_COOLDOWN_MS) ? 0 : REACT_EXTRA_SPEAKERS;
+    const cap = Math.min(order.length, lead.length + extra);
+    pool = lead.concat(rest).slice(0, opts.limit > 0 ? Math.min(opts.limit, cap) : cap);
   } else {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
   }
@@ -587,7 +707,15 @@ async function runRound(id, opts) {
          所以后发言的人能看到先发言的人说了什么，信息才能真正互相影响。
          （并发虽然快，但所有人同一时刻只拿到同一份旧记录，等于各说各的。） */
       const outs = [];
-      for (const seat of pool) {
+      const roundStart = Date.now();
+      for (let idx = 0; idx < pool.length; idx++) {
+        const seat = pool[idx];
+        /* 上一位说完先停一下，给玩家插话的机会；玩家真说话了就等到他安静下来 */
+        if (idx > 0) {
+          await sleep(SPEAK_GAP_MS);
+          await yieldToHuman(id, roundStart);
+          if (!RUNNING.get(id) || !RUNNING.get(id).running) break;
+        }
         run.current = seat;
         let out;
         try {
@@ -607,6 +735,7 @@ async function runRound(id, opts) {
       run.running = false;
       run.current = null;
       run.waiting = [];
+      ROUND_LAST_AT.set(id, Date.now());
     }
   })();
 
@@ -620,7 +749,6 @@ async function runStoryteller(id, opts) {
   if (cur && cur.running) return { ok: false, error: '说书人正在处理中' };
   const s = E.loadState(id);
   const isNight = s.phase === 'night' || s.phase === 'setup';
-  const built = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
 
   const run = { running: true, done: false, result: null, error: null };
   STORY_RUNNING.set(id, run);
@@ -633,27 +761,36 @@ async function runStoryteller(id, opts) {
         const st = E.loadState(id);
         return Array.isArray(st.messages) ? st.messages.length : 0;
       };
-      const m0 = msgN();
-      let out = await callModel({
-        game: id, seat: 'storyteller', prompt: built.prompt,
-        provider: route.provider, model: route.model,
-        system: storytellerSystem(id)
-      });
-      if (out.error) throw new Error(out.error);
-      const m1 = msgN();
-      if (m1 > m0) {
-        const rebuilt = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
+      /* 说书人同理：只要有人在它思考期间插话，就带着新消息重想，直到一整轮无人插话 */
+      let out = null, stRound = 0, stLastN = msgN();
+      for (;;) {
+        stRound++;
+        const cur = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
+        const stPrompt = (stRound === 1)
+          ? cur.prompt
+          : cur.prompt + '\n\n【重要】你上一次思考时，广场上又出现了新消息（见上方对话）。'
+            + '请把玩家这些新的发言纳入你的判断，再给出这一阶段的裁定。';
+        let o;
         try {
-          const out2 = await callModel({
-            game: id, seat: 'storyteller',
-            prompt: rebuilt.prompt + '\n\n【重要】你刚才思考期间，广场上又出现了 ' + (m1 - m0) + ' 条新消息（见上方对话）。'
-              + '请把玩家这些新的发言纳入你的判断，再给出这一阶段的裁定。',
+          o = await callModel({
+            game: id, seat: 'storyteller', prompt: stPrompt,
             provider: route.provider, model: route.model,
             system: storytellerSystem(id)
           });
-          if (out2 && !out2.error && out2.text) out = out2;
-        } catch (e) { /* 重想失败就沿用第一次的结果 */ }
+        } catch (e) {
+          if (out) break;
+          throw e;
+        }
+        if (!o || o.error) {
+          if (out) break;
+          throw new Error((o && o.error) || '说书人调用失败');
+        }
+        out = o;
+        const nowSt = msgN();
+        if (nowSt <= stLastN) break;
+        stLastN = nowSt;
       }
+      if (!out) throw new Error('说书人没有返回结果');
       const parsed = parseReply(out.text);
 
       /* 说书人回包里的座位号从 1 开始，统一在这里折成内部 0 起下标 */
@@ -663,12 +800,22 @@ async function runStoryteller(id, opts) {
         const i = v - 1;
         return (i >= 0 && i < s.seats.length) ? i : -1;
       }
-      const applied = { info: 0, markers: 0, deaths: 0, phase: null };
+      const applied = { info: 0, markers: 0, deaths: 0, phase: null, vote: null, win: null };
       if (parsed.think) E.think(id, 'storyteller', parsed.think);
       if (parsed.say) E.say(id, 'storyteller', parsed.say, 'town');
       parsed.info.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.giveInfo(id, i, x.text); applied.info++; } });
       parsed.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
       parsed.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
+      /* 白天：说书人自己判断何时发起 / 结算处决投票 */
+      if (parsed.voteTarget) {
+        const vt = toIdx(parsed.voteTarget);
+        if (vt >= 0) { const r = E.openVote(id, vt); if (r && r.ok) applied.vote = 'open:' + (vt + 1); }
+      }
+      if (parsed.resolveVote) {
+        const r = E.resolveVote(id);
+        if (r && r.ok) applied.vote = (r.executed === false ? 'failed' : 'executed') + ':' + (r.yes != null ? (r.yes + '/' + r.no) : '');
+        if (r && r.win && r.win.over) applied.win = r.win.side;
+      }
       if (parsed.nextPhase) {
         const r = E.setPhase(id, parsed.nextPhase);
         if (r && r.ok) applied.phase = parsed.nextPhase;
@@ -676,6 +823,7 @@ async function runStoryteller(id, opts) {
       run.result = { think: parsed.think, say: parsed.say, applied: applied, raw: out.text };
       run.done = true;
       E.log(id, '说书人', '主持完成：告知 ' + applied.info + ' 条信息，标记 ' + applied.markers + ' 个状态，死亡 ' + applied.deaths + ' 人'
+        + (applied.vote ? ('，投票 ' + applied.vote) : '')
         + (applied.phase ? ('，进入 ' + applied.phase) : ''));
     } catch (err) {
       run.error = String((err && err.message) || err);
@@ -687,9 +835,88 @@ async function runStoryteller(id, opts) {
   return { ok: true, started: true, phase: s.phase, mode: isNight ? 'night' : 'day' };
 }
 
+/* ---------- 说书人逐条回应聊天 ----------
+   公聊或私聊每来一条，都把内容交给说书人思考：它可以开口，也可以选择不开口；
+   私聊一般都会回。回答直接以说书人的身份落库（private 只回给发信人，town 公开发言）。 */
+const STORY_CHAT_QUEUE = new Map();   /* id -> 待处理的聊天条目数组 */
+const STORY_CHAT_BUSY = new Set();    /* 正在处理中的对局 */
+
+function buildStoryChatPrompt(id, m) {
+  const v = viewForStoryteller(id);
+  const lines = [];
+  lines.push('你是「血染钟鱼」的说书人。刚刚有人给你发了一条消息，请你判断是否需要回应。');
+  lines.push('私聊通常都要回：那是对方在向你提问、请你裁定、或向你透露信息。公聊则看情况——被叫到、被问到、需要提醒规则、需要公布结果时才开口。');
+  lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节）。');
+  lines.push('回复时不要提及「提示词」「模型」「AI」这些词，你就是这张桌子上的说书人。');
+  lines.push('');
+  lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
+  const stt = E.loadState(id);
+  const mins = stt && stt.dayStarted ? Math.max(0, Math.round((Date.now() - new Date(stt.dayStarted).getTime()) / 60000)) : 0;
+  if (v.phase === 'day') lines.push('【白天已经过去】' + mins + ' 分钟');
+  lines.push('');
+  lines.push('【全场座位与真相】（座位号从 1 开始）');
+  v.seats.forEach(function (x) {
+    lines.push((x.seat + 1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配'));
+  });
+  lines.push('');
+  lines.push('【刚刚收到的消息】');
+  lines.push('来自：' + (m.from === 'storyteller' ? '你自己' : ((Number(m.from) + 1) + ' 号 ' + ((v.seats[m.from] || {}).name || '')))
+    + '　频道：' + (m.channel === 'private' ? '私聊' : '公聊'));
+  lines.push(m.text);
+  lines.push('');
+  lines.push('严格只输出一个 JSON 对象：');
+  lines.push('{"think":"你的判断","reply":"你要说的话；不想开口就填空字符串"}');
+  return lines.join('\n');
+}
+
+async function storyReplyOne(id, m) {
+  const s = E.loadState(id);
+  if (!s || !s.storyteller || s.storyteller.type !== 'agent') return { ok: false, error: '本局说书人不是 Agent' };
+  const route = routeFor(id, 'storyteller');
+  const out = await callModel({
+    game: id, seat: 'storyteller', prompt: buildStoryChatPrompt(id, m),
+    provider: route.provider, model: route.model, system: storytellerSystem(id)
+  });
+  if (!out || out.error) throw new Error((out && out.error) || '说书人调用失败');
+  const parsed = parseReply(out.text);
+  if (parsed.think) E.think(id, 'storyteller', parsed.think);
+  const reply = String(parsed.reply || parsed.say || '').trim();
+  if (!reply) return { ok: true, silent: true };
+  if (m.channel === 'private') E.say(id, 'storyteller', reply, 'private', [Number(m.from)]);
+  else E.say(id, 'storyteller', reply, 'town');
+  return { ok: true, silent: false, reply: reply };
+}
+
+/* 外部入口：把一条聊天塞进队列，串行交给说书人处理，返回是否接受 */
+function storyReply(id, m) {
+  if (!m || m.from === 'storyteller') return { ok: false, error: '自己的消息不需要回应' };
+  const q = STORY_CHAT_QUEUE.get(id) || [];
+  q.push(m);
+  STORY_CHAT_QUEUE.set(id, q);
+  drainStoryChat(id);
+  return { ok: true, queued: q.length };
+}
+
+async function drainStoryChat(id) {
+  if (STORY_CHAT_BUSY.has(id)) return;
+  STORY_CHAT_BUSY.add(id);
+  try {
+    for (;;) {
+      const q = STORY_CHAT_QUEUE.get(id) || [];
+      if (!q.length) break;
+      const m = q.shift();
+      STORY_CHAT_QUEUE.set(id, q);
+      try { await storyReplyOne(id, m); } catch (e) { /* 单条失败不影响后续 */ }
+    }
+  } finally {
+    STORY_CHAT_BUSY.delete(id);
+  }
+}
+
 module.exports = {
   viewFor, viewForStoryteller, buildPrompt, buildStorytellerNightPrompt, buildStorytellerDayPrompt,
   parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
   setLlmCall, hasLlm, routeFor,
-  wikiLookup, clearKnowledge, playerSystem, storytellerSystem, gameKnowledge, CORE_RULES
+  wikiLookup, clearKnowledge, playerSystem, storytellerSystem, gameKnowledge, CORE_RULES, BALANCE_RULES,
+  storyReply, buildStoryChatPrompt
 };
