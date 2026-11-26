@@ -147,7 +147,8 @@ function storytellerSystem(id){
   const kb = gameKnowledge(id);
   return clip(RULES + '\n\n' + READING_RULES + '\n\n' + BALANCE_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
     + '\n\n本剧本：' + (kb.scriptText||'')
-    + '\n\n本剧本全部角色能力原文：\n' + kb.roleDetail, ST_SYSTEM_CLIP);
+    + '\n\n本剧本全部角色能力速览：\n' + kb.roleBrief
+    + '\n\n本剧本角色细则：\n' + kb.roleDetail, ST_SYSTEM_CLIP);
 }
 
 let ROLES_CACHE = null;
