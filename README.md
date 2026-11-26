@@ -4,7 +4,7 @@
 
 - 中文名：血染钟鱼
 - 英文名：DSH on the Clocktower
-- 最新版本：0.6.5
+- 最新版本：0.6.6
 - 仓库：https://github.com/TAOQILA/dsh-on-the-clocktower
 - 许可证：GNU AGPL-3.0（AGPL-3.0-only）
 

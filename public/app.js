@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.5';
+var VERSION = '0.6.6';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -575,7 +575,7 @@ async function loadWiki(){
   try {
     var d = await api('wikiList');
     if(S.tab!=='wiki') return;
-    var list = (d && d.data) || [];
+    var list = Array.isArray(d) ? d : ((d && d.data) || []);
     var WIKI_ORDER = ['规则','剧本','角色'];
     var groups = { '规则': [], '剧本': [], '角色': [] };
     list.forEach(function(it){
