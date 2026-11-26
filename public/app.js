@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.8';
+var VERSION = '0.6.9';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0 };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -99,7 +99,46 @@ function splitKey(key){
   return {provider:key.slice(0,i), model:key.slice(i+1)};
 }
 
+/* 整页重建前记住各滚动区域的位置，避免每 3 秒刷新把页面/聊天框弹回顶部 */
+function capScroll(){
+  var sc = document.scrollingElement || document.documentElement;
+  var k = { win: sc ? sc.scrollTop : 0, right: 0, chat: null, chatBottom: true, chatCount: -1 };
+  var rt = document.querySelector('.right'); if (rt) k.right = rt.scrollTop;
+  var cl = document.getElementById('chatLog');
+  if (cl){
+    k.chat = cl.scrollTop;
+    k.chatBottom = (cl.scrollHeight - cl.scrollTop - cl.clientHeight) < 28;
+    k.chatCount = cl.getAttribute('data-count') !== null ? +cl.getAttribute('data-count') : -1;
+  }
+  return k;
+}
+function jumpChatBottom(){
+  var cl = document.getElementById('chatLog'); if (cl) cl.scrollTop = cl.scrollHeight;
+  S.chatSeen = (S.chatMsgs || []).length;
+  var m = document.getElementById('chatMore'); if (m) m.style.display = 'none';
+}
+function restoreScroll(k){
+  if (!k) return;
+  var cl = document.getElementById('chatLog');
+  if (cl){
+    var cnt = (S.chatMsgs || []).length;
+    if (k.chat === null || k.chatBottom){
+      cl.scrollTop = cl.scrollHeight;
+      S.chatSeen = cnt;
+    } else {
+      cl.scrollTop = k.chat;
+      if (cnt > S.chatSeen){
+        var m = document.getElementById('chatMore');
+        if (m){ m.style.display = 'block'; m.textContent = '有 ' + (cnt - S.chatSeen) + ' 条新消息 ↓'; }
+      }
+    }
+  }
+  var rt = document.querySelector('.right'); if (rt) rt.scrollTop = k.right;
+  var sc = document.scrollingElement || document.documentElement;
+  if (sc) sc.scrollTop = k.win;
+}
 function render(){
+  var keep = capScroll();
   var g = S.game, seats = g?g.seats:S.seats;
   var cur = g?g.phase:'setup';
   document.body.classList.toggle('night', cur === 'night' || cur === 'dawn');
@@ -125,6 +164,7 @@ function render(){
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
     '</div></div><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div></div>';
   drawTable(seats,g);
+  restoreScroll(keep);
 }
 function drawTable(seats,g){
   var table = $('#table'), n = seats.length, cx=50, cy=50, rx=36, ry=36;
@@ -137,6 +177,7 @@ function drawTable(seats,g){
     el.className = 'seat '+(mine?'human':'agent')+(dead?' dead':'')+(S.selSeat===i?' selected':'');
     el.style.left=x+'%'; el.style.top=y+'%';
     var role = g && g.roles[i] ? g.roles[i] : (s.role||'');
+    if (g && !iAmStoryteller(g) && !iAmSpectator(g) && i !== mySeatInGame(g) && !(g.win && g.win.over)) role = '';
     var marks = g && g.markers[i] ? g.markers[i].join(' ') : '';
     el.innerHTML = '<div class="seatnum">'+(i+1)+'</div><div class="token">'+(mine?'你':'AI')+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
       '<div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div>';
@@ -279,7 +320,7 @@ async function renameSeat(seat, name){
   try {
     var cur = S.game.seats[seat] || {};
     await api('seatModel',{id:S.game.id,seat:seat,provider:cur.provider||'',model:cur.model||'',name:name});
-    S.game = await api('game',{id:S.game.id});
+    S.game = await api('game',gameReq());
   } catch(e){}
   render();
 }
@@ -297,7 +338,7 @@ async function saveSeatModel(seat, provider, model){
   try {
     var nm = arr && arr[seat] ? arr[seat].name : '';
     await api('seatModel',{id:S.game.id,seat:seat,provider:provider,model:model,name:nm});
-    S.game = await api('game',{id:S.game.id}); render();
+    S.game = await api('game',gameReq()); render();
   } catch(e){}
 }
 function autoNameOf(provider, model){
@@ -309,7 +350,7 @@ async function saveStoryModel(provider, model){
   if(!S.game) { render(); return; }
   try {
     await api('seatModel',{id:S.game.id,seat:'storyteller',provider:provider,model:model});
-    S.game = await api('game',{id:S.game.id});
+    S.game = await api('game',gameReq());
     render();
   } catch(e){ S.startError = '说书人模型保存失败：'+((e&&e.message)||e); render(); }
 }
@@ -510,6 +551,8 @@ function canControl(){
   if (S.game.win && S.game.win.over) return false; // 终局后一切操作只读
   return iAmStoryteller(S.game) || iAmPlayer(S.game);
 }
+/* 读取对局时带上视角，非说书人不会拿到中毒/醉酒等隐藏标记 */
+function gameReq(){ return { id:S.game.id, storyteller:iAmStoryteller(S.game) }; }
 /* 打开/创建对局后，把「你」的摆放同步成这一局里的真实身份 */
 function syncMeFromGame(g){
   if(!g) return;
@@ -538,7 +581,8 @@ function chatPanel(g){
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
     (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
     '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
-    '<div id="chatLog" class="log" style="max-height:360px">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
+    '<div id="chatLog" class="log" style="max-height:360px" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
+    '<div id="chatMore" class="chatmore" onclick="jumpChatBottom()" style="display:none"></div>'+
     roundSection()+
     '</div>';
 }
@@ -553,7 +597,11 @@ async function sendChat(){
   inp.value='';
   await loadChat();
   if (ch === 'town') runRound(3);
-  else refresh();
+  else {
+    /* 私聊：唤醒收件人 Agent 回一条（不占用其主动私聊名额） */
+    if (to.length) api('round',{id:S.game.id, seats:to, replyTo:mySeatInGame(S.game)}).catch(function(){});
+    refresh();
+  }
 }
 /* 离开当前对局（不删文件） */
 function leaveGame(){
@@ -592,7 +640,7 @@ async function loadHistory(){
 }
 async function openGame(id){
   try {
-    var g = await api('game',{id:id});
+    var g = await api('game',{id:id, storyteller:false});
     if(!g) throw new Error('没有这一局');
     S.game = g; S.selSeat = 0; S.tab = 'grimoire'; S.round = null;
     syncMeFromGame(g);
@@ -679,7 +727,7 @@ async function refresh(){
   var ae = document.activeElement;
   if (ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')) return;
   if(!S.game) return;
-  S.game = await api('game',{id:S.game.id});
+  S.game = await api('game',gameReq());
   if(!S.round || !S.round.running){
     try { S.round = await api('roundStatus',{id:S.game.id}); } catch(e){}
   }

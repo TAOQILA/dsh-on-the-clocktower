@@ -224,7 +224,7 @@ function renderMessages(msgs, seats) {
   }).join('\n');
 }
 
-function buildPrompt(id, seat) {
+function buildPrompt(id, seat, replyTo) {
   const v = viewFor(id, seat);
   const s = E.loadState(id);
   const lines = [];
@@ -253,7 +253,11 @@ function buildPrompt(id, seat) {
   lines.push(renderMessages(v.messages, s.seats));
   lines.push('');
   lines.push('【你这一轮要做什么】');
-  lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
+  if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
+    lines.push('有人刚刚私聊了你（见上方对话里的对话）。请用 whisper 私下回复 ' + (Number(replyTo) + 1) + ' 号，不要公开发言（say 留空）。');
+  } else {
+    lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
+  }
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}]}');
   lines.push('如果不想私聊，whisper 给空数组。');
@@ -337,7 +341,8 @@ async function callModel(payload) {
         provider: payload.provider || '',
         model: payload.model || ''
       });
-      return { text: String(text == null ? '' : text) };
+      const flat = (text && typeof text === 'object') ? (text.text != null ? text.text : (text.content != null ? text.content : '')) : text;
+      return { text: String(flat == null ? '' : flat) };
     } catch (err) {
       return { error: String((err && err.message) || err) };
     }
@@ -445,8 +450,14 @@ async function runRound(id, opts) {
     if (x.type === 'agent' && s.alive[i] && i !== s.storytellerSeat) order.push(i);
   });
   if (!order.length) return { ok: false, error: '没有可驱动的 Agent 座位' };
-  /* limit>0 时只唤醒前 limit 位，用于「让最近说话的几位先接一句」 */
-  const pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
+  /* limit>0 时只唤醒前 limit 位，用于「让最近说话的几位先接一句」；seats 传入时只唤醒指定座位（私聊回复） */
+  let pool;
+  if (Array.isArray(opts.seats) && opts.seats.length) {
+    pool = opts.seats.map(Number).filter(function (n) { return order.indexOf(n) >= 0; });
+    if (!pool.length) return { ok: false, error: '指定的座位不可唤醒' };
+  } else {
+    pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
+  }
 
   const run = { running: true, done: 0, total: pool.length, current: null, results: [], error: null };
   RUNNING.set(id, run);
@@ -455,15 +466,24 @@ async function runRound(id, opts) {
     try {
       for (const seat of pool) {
         run.current = seat;
-        const built = buildPrompt(id, seat);
+        const built = buildPrompt(id, seat, opts.replyTo);
         const route = routeFor(id, seat);
         const out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
         const parsed = out.error
           ? { think: '', say: '（本轮该 Agent 调用失败：' + out.error + '）', whisper: [] }
           : parseReply(out.text);
         if (parsed.think) E.think(id, seat, parsed.think);
-        if (parsed.say) E.say(id, seat, parsed.say, 'town');
-        (parsed.whisper || []).slice(0, MAX_DM_PER_DAY).forEach(function (w) {
+        const dmReplyTo = (opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1;
+        const whispered = (parsed.whisper || []).length > 0;
+        if (dmReplyTo >= 0) {
+          /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
+          const firstWhisper = (parsed.whisper && parsed.whisper.length) ? String(parsed.whisper[0].text || '') : '';
+          const back = parsed.say || firstWhisper;
+          if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
+        } else if (parsed.say) {
+          E.say(id, seat, parsed.say, 'town');
+        }
+        (dmReplyTo >= 0 ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
           /* 模型给的座位号是 1 起，落库用 0 起 */
           const to = (w.to || []).map(function (n) { return Number(n) - 1; })
             .filter(function (n) { return n >= 0 && n < s.seats.length && n !== seat; });
