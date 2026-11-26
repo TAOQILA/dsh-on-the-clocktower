@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.10.0';
+var VERSION = '0.10.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -21,7 +21,8 @@ async function api(name, data){
   return j.data;
 }
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:false, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
-  fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true };
+  fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
+  bgOn:true, bgBlur:2, bgBright:50, panelAlpha:75, hideSide:false };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -63,6 +64,11 @@ function savePrefs(){
       showBubbles: S.showBubbles !== false,
       nightTheme: S.nightTheme !== false,
       showScriptLine: S.showScriptLine !== false,
+      hideSide: S.hideSide === true,
+      panelAlpha: (typeof S.panelAlpha === 'number' ? S.panelAlpha : 75),
+      bgOn: S.bgOn !== false,
+      bgBlur: (typeof S.bgBlur === 'number' ? S.bgBlur : 2),
+      bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 50),
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
     }));
@@ -79,6 +85,11 @@ function loadPrefs(){
       var hit = S.scripts.filter(function(x){ return x.name === o.script; })[0];
       if (hit) S.script = hit;
     }
+    if (typeof o.hideSide === 'boolean') S.hideSide = o.hideSide;
+    if (typeof o.panelAlpha === 'number' && isFinite(o.panelAlpha)) S.panelAlpha = o.panelAlpha;
+    if (typeof o.bgOn === 'boolean') S.bgOn = o.bgOn;
+    if (typeof o.bgBlur === 'number' && isFinite(o.bgBlur)) S.bgBlur = o.bgBlur;
+    if (typeof o.bgBright === 'number' && isFinite(o.bgBright)) S.bgBright = o.bgBright;
     if (typeof o.autoChat === 'boolean') S.autoChat = o.autoChat;
     if (typeof o.autoStory === 'boolean') S.autoStory = o.autoStory;
     S.storyName = o.storyName || '说书人';
@@ -277,10 +288,15 @@ function render(force){
   var keep = capScroll();
   var g = S.game, seats = g?g.seats:S.seats;
   var cur = g?g.phase:'setup';
-  document.body.classList.toggle('night', (S.nightTheme !== false) && (cur === 'night' || cur === 'dawn'));
+  var isNightPhase = (cur === 'night' || cur === 'dawn');
+  document.body.classList.toggle('night', (S.nightTheme !== false) && isNightPhase);
+  /* 背景图始终跟着阶段走：切到夜晚时两张图淡入淡出 */
+  document.body.classList.toggle('bgnight', isNightPhase);
   /* 字号：整个界面按比例缩放（Chromium/Edge 支持 zoom），设置里可调 */
   var appEl = document.getElementById('app');
   if (appEl) appEl.style.zoom = String(S.fontScale || 1);
+  applyBg();
+  applyPanelAlpha();
   var sel = seats[S.selSeat]||{};
   var roleNames = S.script?S.script.roles:[];
   var tabsHtml = '';
@@ -305,8 +321,10 @@ function render(force){
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   $('#app').innerHTML =
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
-    '<div class="layout'+(S.hideChat?' nochat':'')+'">'+
-    '<div class="right" data-keep="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div>'+
+    '<div class="layout'+(S.hideChat?' nochat':'')+(S.hideSide?' noside':'')+'">'+
+    '<div class="right" data-keep="right">'+ (S.hideSide
+      ? '<button class="sideexpand" onclick="toggleSide()" title="展开侧栏">‹<br>侧<br>栏</button>'
+      : '<button class="sidefold" onclick="toggleSide()" title="收起侧栏">收起侧栏 ›</button>'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel) +'</div>'+
     '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div>'+
     '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
@@ -314,7 +332,10 @@ function render(force){
     ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')+
     '</div>'+
     '</div>'+ dmFloating(g) +'</div>'+
-    '<div class="chatcol"><button class="chatfold" onclick="toggleChat()" title="收起 / 展开聊天">'+(S.hideChat?'‹ 展开聊天':'收起聊天 ›')+'</button>'+
+    '<div class="chatcol"><div class="chatbar">'+
+      '<button class="dmopen'+(S.showDm?' on':'')+'" onclick="toggleDm()" title="打开 / 收起私聊" '+(g?'':'disabled')+'>'+(S.showDm?'× 收起私聊':'私聊')+'</button>'+
+      '<button class="chatfold" onclick="toggleChat()" title="收起 / 展开聊天">'+(S.hideChat?'‹ 展开聊天':'收起聊天 ›')+'</button>'+
+    '</div>'+
     (S.hideChat?'':'<div class="chatinner">'+ chatPanel(g) +'</div>')+'</div></div>';
   drawTable(seats,g);
   fitBubbles();
@@ -440,6 +461,27 @@ function cornerDock(g){
   return '<div class="dock">' + stBox(g) + specBox() + '</div>';
 }
 /* 左栏（聊天）收起 / 展开 */
+/* 右侧面板栏收起 / 展开 */
+function toggleSide(){
+  S.hideSide = !S.hideSide;
+  savePrefs();
+  render(true);
+  setTimeout(placeMe, 0);
+}
+/* 侧边栏不透明度（0–100，默认 75） */
+function setPanelAlpha(val){
+  var v = Number(val);
+  if (!isFinite(v)) return;
+  S.panelAlpha = Math.max(0, Math.min(100, v));
+  var lab = document.getElementById('panelAlphaVal');
+  if (lab) lab.textContent = Math.round(S.panelAlpha) + '%';
+  savePrefs();
+  applyPanelAlpha();
+}
+function applyPanelAlpha(){
+  var a = (typeof S.panelAlpha === 'number' ? S.panelAlpha : 75) / 100;
+  document.body.style.setProperty('--panel-alpha', a.toFixed(3));
+}
 function toggleChat(){
   S.hideChat = !S.hideChat;
   savePrefs();
@@ -912,7 +954,20 @@ function settingsPanel(){
   var scaleBtns = scales.map(function(v){
     return '<button class="pill'+(Math.abs((S.fontScale||1)-v)<0.001?' on':'')+'" onclick="setOpt(\'fontScale\','+v+')">'+Math.round(v*100)+'%</button>';
   }).join('');
+  var bgBox = '<div id="bgopts" style="'+(S.bgOn===false?'display:none':'')+'">'+
+      '<div class="setrow"><div>背景模糊度 <span class="setval" id="bgBlurVal">'+(S.bgBlur==null?2:S.bgBlur)+'%</span></div>'+
+        '<input type="range" min="0" max="20" step="0.5" value="'+(S.bgBlur==null?2:S.bgBlur)+'" oninput="setBg(\'bgBlur\',this.value)"></div>'+
+      '<div class="setrow"><div>背景亮度 <span class="setval" id="bgBrightVal">'+(S.bgBright==null?50:S.bgBright)+'%</span></div>'+
+        '<input type="range" min="0" max="100" step="1" value="'+(S.bgBright==null?50:S.bgBright)+'" oninput="setBg(\'bgBright\',this.value)">'+
+        '<div class="muted">50% 为原图亮度；越高越亮，100% 纯白，0% 纯黑。</div></div>'+
+    '</div>';
   return '<div class="section"><h3>设置 · 外观</h3>'+
+      '<div class="setrow"><label><input type="checkbox" '+(S.bgOn!==false?'checked':'')+' onchange="toggleBg(this)"> 显示背景图</label>'+
+      '<div class="muted">白天与夜晚各有一张背景，切换阶段时自动渐变过渡；开启后界面底色透明，只保留圆桌。</div></div>'+
+      bgBox+
+      '<div class="setrow"><div>侧边栏不透明度 <span class="setval" id="panelAlphaVal">'+Math.round(S.panelAlpha==null?75:S.panelAlpha)+'%</span></div>'+
+        '<input type="range" min="0" max="100" step="1" value="'+(S.panelAlpha==null?75:S.panelAlpha)+'" oninput="setPanelAlpha(this.value)">'+
+        '<div class="muted">作用于左右两侧面板、公聊栏、说书人与旁观席小框、私聊浮层。100% 为不透明。</div></div>'+
       '<div class="setrow"><div>字号</div><div class="row">'+scaleBtns+'</div>'+
       '<div class="muted">整个界面按比例缩放。</div></div>'+
       sw('nightTheme','夜晚切换为冷色主题','进入夜晚/日落时界面变成蓝紫色。')+
@@ -933,6 +988,43 @@ function settingsPanel(){
     '<div class="section"><h3>设置 · 重置</h3>'+
       '<div class="row"><button onclick="if(confirm(\'清除本机保存的所有建局偏好？\')){localStorage.removeItem(PREF_KEY);location.reload();}">清除本机偏好</button></div>'+
       '<div class="muted">会清掉剧本、人数、昵称、模型、外观设置，回到默认。</div></div>';
+}
+/* 背景：白天/夜晚两张图叠在一起，靠 body.bgnight 切 opacity 实现渐变；
+   亮度以 50% 为原图，100% 纯白、0% 纯黑（用白色/黑色蒙层实现，不做计算）。 */
+function applyBg(){
+  var on = S.bgOn !== false;
+  var body = document.body;
+  body.classList.toggle('hasbg', on);
+  body.classList.toggle('nobg', !on);
+  var blur = (typeof S.bgBlur === 'number' && isFinite(S.bgBlur)) ? S.bgBlur : 2;
+  var bright = (typeof S.bgBright === 'number' && isFinite(S.bgBright)) ? S.bgBright : 50;
+  body.style.setProperty('--bg-blur', blur + 'px');
+  /* 50% = 原图：亮度用 filter 保持 1，靠白色蒙层提亮、黑色蒙层压暗 */
+  body.style.setProperty('--bg-bright', '1');
+  if (bright >= 50){
+    var w = (bright - 50) / 50;   /* 0 → 1 纯白 */
+    body.style.setProperty('--bg-tint', 'rgba(255,255,255,' + (w * 0.92).toFixed(3) + ')');
+  } else {
+    var d = (50 - bright) / 50;   /* 0 → 1 纯黑 */
+    body.style.setProperty('--bg-tint', 'rgba(0,0,0,' + (d * 0.92).toFixed(3) + ')');
+  }
+}
+/* 设置页里的滑块 */
+function setBg(key, val){
+  val = Number(val);
+  if (!isFinite(val)) return;
+  S[key] = val;
+  var lab = document.getElementById(key + 'Val');
+  if (lab) lab.textContent = val + (key === 'bgBlur' ? '%' : '%');
+  savePrefs();
+  applyBg();
+}
+function toggleBg(el){
+  S.bgOn = !!el.checked;
+  savePrefs();
+  applyBg();
+  var box = document.getElementById('bgopts');
+  if (box) box.style.display = S.bgOn ? '' : 'none';
 }
 function setOpt(key, val){
   S[key] = val;

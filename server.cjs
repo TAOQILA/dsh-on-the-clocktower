@@ -23,7 +23,8 @@ const A = require('./agents.cjs');
 
 const ROOT = __dirname, PUB = path.join(ROOT, 'public');
 const MIME = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8',
-  '.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.md':'text/markdown; charset=utf-8'};
+  '.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.md':'text/markdown; charset=utf-8',
+  '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.svg':'image/svg+xml'};
 
 function send(res, code, data, type){
   res.writeHead(code, {'Content-Type': type||'application/json; charset=utf-8','Access-Control-Allow-Origin':'*'});

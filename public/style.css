@@ -1,11 +1,11 @@
 /* 血染钟鱼 - 魔典主题（白天/默认：红黄暖色，夜晚：暗蓝紫冷色） */
-:root{--blood:#a31621;--blood2:#7d0f18;--parch:#e8dcc0;--ink:#2b1d14;--gold:#c9a227;--bg:#12100e;
+:root{--panel-alpha:.75;--blood:#a31621;--blood2:#7d0f18;--parch:#e8dcc0;--ink:#2b1d14;--gold:#c9a227;--bg:#12100e;
   --accent:#a31621;--accent2:#7d0f18;--glow:#c9a227}
 body.night{--accent:#4b3a8f;--accent2:#2a2059;--glow:#8d7fd4;--parch:#d9d2f0;--gold:#9c8fe0;
   --bg:#080713;--panel-a:#141230;--panel-b:#07060f;--edge:#332c58;--hdr:#0d0b1a;
   --surf:#12102a;--surf2:#0d0b1e;--edge2:#332c58;--dim:#8f86bd}
 body.night header{background:linear-gradient(90deg,var(--accent2),var(--hdr))}
-body.night .left,body.night .right{background:radial-gradient(circle at 50% 40%,var(--panel-a),var(--panel-b));border-color:var(--edge)}
+body.night .left,body.night .right{background:radial-gradient(circle at 50% 40%,rgba(20,18,48,var(--panel-alpha)),rgba(7,6,15,var(--panel-alpha)));border-color:var(--edge)}
 body.night .sub{color:#b6ace0}
 body.night .version{color:#a99be0;border-color:#463c73}
 body.night input,body.night select{background:#191631;border-color:#463c73}
@@ -54,9 +54,16 @@ button:hover{background:var(--accent)}button:disabled{opacity:.4;cursor:not-allo
 input,select{background:#221d18;color:var(--parch);border:1px solid #6b5a3e;border-radius:5px;padding:7px 10px;font-family:inherit}
 .layout{display:grid;grid-template-columns:minmax(440px,560px) minmax(240px,1fr) minmax(420px,560px);gap:14px;padding:14px;height:calc(100vh - 52px)}
 .layout.nochat{grid-template-columns:minmax(440px,560px) minmax(240px,1fr) 66px}
-.left,.right{border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,var(--panel-a,#241c16),var(--panel-b,#14110e))}
-.left{position:relative;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px;overflow:hidden}.right{overflow-y:auto;padding:16px}
-.table{position:relative;width:min(100%, calc(100vh - 120px));aspect-ratio:1 / 1;height:auto;min-height:0;margin:0 auto;flex:0 0 auto}
+.layout.noside{grid-template-columns:minmax(320px,480px) minmax(0,1fr) 30px}
+.layout.noside .right{display:none}
+.layout.nochat.noside{grid-template-columns:64px minmax(0,1fr) 30px}
+.left,.right{border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,rgba(36,28,22,var(--panel-alpha)),rgba(20,17,14,var(--panel-alpha)));backdrop-filter:blur(2px)}
+.left{position:relative;min-height:0;display:grid;place-items:center;padding:14px;overflow:hidden;container-type:size}.right{overflow-y:auto;padding:16px}
+.table{position:relative;aspect-ratio:1 / 1;min-height:0;margin:0;justify-self:center;align-self:center;
+  max-width:100%;max-height:100%;
+  /* 不支持容器查询时退回视口高度；支持时严格按容器短边自适应，永远居中 */
+  width:min(100%, calc(100vh - 120px));
+  width:min(100%, 100cqh)}
 .layout.nochat .table{width:min(100%, calc(100vh - 120px))}
 .center-badge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;z-index:2;pointer-events:none}
 .center-badge .phase{font-size:22px;font-weight:900;color:var(--gold);text-shadow:0 0 14px #000}
@@ -108,11 +115,11 @@ body.night .wikiback,body.night .wikihead{border-color:var(--edge2)}
 
 .dock{position:absolute;left:10px;top:10px;bottom:10px;z-index:6;display:flex;flex-direction:column;align-items:center;gap:10px;width:96px;pointer-events:none}
 .dock>*{pointer-events:auto}
-.stbox{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;width:96px;cursor:pointer}
+.stbox{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;width:96px;cursor:pointer;padding:6px 4px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(0,0,0,calc(.28 * var(--panel-alpha) + .06));backdrop-filter:blur(2px)}
 .sttoken{width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;color:#f3e6c8;background:radial-gradient(circle at 35% 30%,#4a3418,#1a1208);border:2px solid var(--gold);box-shadow:0 0 14px rgba(201,162,39,.45)}
 .stname{font-size:12px;color:var(--parch);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:104px;text-align:center}
 .strole{font-size:11px;font-weight:900;color:var(--gold);letter-spacing:2px}
-.specbox{position:relative;width:96px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 4px;border:1px dashed #4a3c28;border-radius:8px;color:#7d705a;cursor:pointer;margin-top:auto}
+.specbox{position:relative;width:96px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 4px;border:1px dashed #4a3c28;border-radius:8px;color:#7d705a;cursor:pointer;margin-top:auto;background:rgba(0,0,0,calc(.24 * var(--panel-alpha) + .05));backdrop-filter:blur(2px)}
 .specbox.on{border-color:var(--gold);background:rgba(201,162,39,.10);color:var(--parch)}
 .speclabel{font-size:12px;font-weight:900;letter-spacing:1px}
 .specdesc{font-size:10px;opacity:.8}
@@ -133,13 +140,13 @@ body.night .smno{background:#0a0918;border-color:var(--edge2)}
 body.night .chatmore{color:#0b0a14;background:#9c8fe0}
 .log.chatlog{max-height:none;flex:1 1 auto;min-height:120px;overflow:auto}
 body.night .log.chatlog{background:#0a0918;border:1px solid #221e3c}
-.chatcol{display:flex;flex-direction:column;min-height:0;border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,var(--panel-a,#241c16),var(--panel-b,#14110e));padding:12px;overflow:hidden}
+.chatcol{display:flex;flex-direction:column;min-height:0;border:1px solid var(--edge,#4a3c28);border-radius:10px;background:radial-gradient(circle at 50% 40%,rgba(36,28,22,var(--panel-alpha)),rgba(20,17,14,var(--panel-alpha)));backdrop-filter:blur(2px);padding:12px;overflow:hidden}
 .chatwrap{display:flex;flex-direction:column;min-height:0;flex:1;gap:6px}
 .chatwrap h3{margin:0;font-size:16px;color:var(--gold)}
 .chatwho{margin:0}
 .chatempty{padding:18px 6px}
 .chatinput{margin-top:8px;gap:8px}.chatinput input{font-size:16px;padding:10px 12px}.chatinput select,.chatinput button{font-size:15px}
-body.night .chatcol{background:radial-gradient(circle at 50% 40%,var(--panel-a),var(--panel-b));border-color:var(--edge)}
+body.night .chatcol{background:radial-gradient(circle at 50% 40%,rgba(20,18,48,var(--panel-alpha)),rgba(7,6,15,var(--panel-alpha)));border-color:var(--edge)}
 @media (max-width:1180px){
   .layout{grid-template-columns:1fr;grid-template-rows:auto auto minmax(320px,42vh);height:auto}
   .chatcol{min-height:320px}
@@ -182,7 +189,16 @@ body.night .bubble.dm{background:#2d2350;border-color:#8f7fd8}
 body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 /* ---- 聊天：座位号底色徽章 + 昵称 + 彩色 @ + 圆角气泡 ---- */
 .chatinner{display:flex;flex-direction:column;min-height:0;flex:1}
-.chatfold{align-self:flex-end;margin-bottom:8px;font-size:12px;padding:4px 10px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
+.sidefold{align-self:flex-end;margin-bottom:6px;font-size:12px;padding:3px 9px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
+.sidefold:hover{color:var(--gold);border-color:var(--gold)}
+.sideexpand{width:26px;align-self:stretch;font-size:12px;line-height:1.4;padding:8px 2px;border-radius:10px;background:rgba(0,0,0,.28);border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer;grid-column:3}
+.sideexpand:hover{color:var(--gold);border-color:var(--gold)}
+.chatbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dmopen{font-size:12px;font-weight:900;padding:4px 12px;border-radius:14px;background:linear-gradient(160deg,#7a68d8,#4b3a8f);border:1px solid #b7a9ff;color:#fff;cursor:pointer}
+.dmopen:hover{filter:brightness(1.12)}
+.dmopen.on{background:#231b3f;border-color:#7a68d8;color:#cfc6ff}
+.dmopen:disabled{opacity:.4;cursor:not-allowed}
+.chatfold{margin-left:auto;margin-bottom:0;font-size:12px;padding:4px 10px;border-radius:8px;background:transparent;border:1px solid var(--edge,#4a3c28);color:var(--muted,#9c8b6d);cursor:pointer}
 .chatfold:hover{color:var(--gold);border-color:var(--gold)}
 .layout.nochat .chatcol{padding:8px 4px;align-items:center}
 .layout.nochat .chatfold{writing-mode:vertical-rl;letter-spacing:2px;padding:10px 4px;margin:0 auto}
@@ -211,7 +227,7 @@ body.night *::-webkit-scrollbar-thumb:hover{background:#4b3f7d;background-clip:c
 .dmfab{position:absolute;right:0;top:0;z-index:14;font-size:12px;font-weight:900;padding:5px 12px;border-radius:14px;background:linear-gradient(160deg,#7a68d8,#4b3a8f);border:1px solid #b7a9ff;color:#fff;box-shadow:0 3px 10px rgba(0,0,0,.5)}
 .dmfab:hover{filter:brightness(1.12)}
 .dmfab.on{background:#231b3f;border-color:#7a68d8;color:#cfc6ff}
-.dmcol{position:absolute;inset:34px 0 0 0;display:flex;flex-direction:column;min-height:0;gap:6px;padding:10px;border:1px solid #7a68d8;border-radius:10px;background:rgba(20,16,32,.97);box-shadow:0 10px 30px rgba(0,0,0,.65);backdrop-filter:blur(2px)}
+.dmcol{position:absolute;inset:34px 0 0 0;display:flex;flex-direction:column;min-height:0;gap:6px;padding:10px;border:1px solid #7a68d8;border-radius:10px;background:rgba(20,16,32,calc(.55 + .42 * var(--panel-alpha)));box-shadow:0 10px 30px rgba(0,0,0,.65);backdrop-filter:blur(3px)}
 .dmhead{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:900;color:#cfc6ff}
 .dmhead .dmclose{margin-left:auto;background:transparent;border:1px solid #7a68d8;color:#cfc6ff;border-radius:8px;padding:2px 9px;font-size:13px;cursor:pointer}
 .dmhead .dmclose:hover{background:#3a2f5c}
@@ -243,3 +259,44 @@ body.night .setrow{border-bottom-color:#2b2745}
 .bubbles.below{bottom:auto;top:100%;margin-bottom:0;margin-top:6px;flex-direction:column}
 .bubble.faded{opacity:0;transition:opacity 1.2s ease}
 body.night .daytimer{}
+
+/* ================= 全屏背景（白天/夜晚双图渐变切换 + 模糊 + 亮度） ================= */
+#bgwrap{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:var(--bg)}
+.bglayer{position:absolute;inset:-8%;background-size:cover;background-position:center center;background-repeat:no-repeat;
+  opacity:0;transition:opacity 1.8s ease;filter:blur(var(--bg-blur,2px)) brightness(var(--bg-bright,1))}
+.bglayer.day{background-image:url('bg/day.png');opacity:1}
+body.bgnight .bglayer.day{opacity:0}
+body.bgnight .bglayer.night{opacity:1}
+.bgscrim{position:absolute;inset:0;background:rgba(0,0,0,.16);pointer-events:none}
+.bgtint{position:absolute;inset:0;background:var(--bg-tint,transparent);pointer-events:none}
+body.nobg #bgwrap{display:none}
+
+/* 背景开启时：界面本身透明，让背景贯通；只有圆桌保留底色 */
+body.hasbg{background:transparent}
+body.hasbg header{background:transparent;border-bottom-color:rgba(0,0,0,.18)}
+body.hasbg .left,body.hasbg .right,body.hasbg .chatcol{background:transparent;border-color:rgba(255,255,255,.14)}
+body.hasbg.night .left,body.hasbg.night .right,body.hasbg.night .chatcol{background:transparent;border-color:rgba(160,148,220,.22)}
+body.hasbg.night header{background:transparent}
+body.hasbg .log,body.hasbg.night .log,body.hasbg.night .log.chatlog{background:rgba(8,7,12,.55)}
+body.hasbg .chatcol{backdrop-filter:blur(1px)}
+
+/* 圆桌：保留底色并做成圆形桌面 */
+.table{background:radial-gradient(circle at 50% 38%,var(--panel-a,#241c16),var(--panel-b,#14110e));
+  border:1px solid var(--edge,#4a3c28);border-radius:50%;box-shadow:inset 0 0 70px rgba(0,0,0,.55),0 10px 40px rgba(0,0,0,.45)}
+body.night .table{box-shadow:inset 0 0 80px rgba(70,50,150,.28),0 10px 40px rgba(0,0,0,.6)}
+
+/* 设置页里的滑块 */
+.setrow input[type=range]{width:100%;accent-color:var(--gold)}
+.setrow .setval{font-size:12px;color:var(--gold);font-weight:900;margin-left:6px}
+
+/* 背景开启时，这些卡片也半透明，避免一块块实色遮挡背景 */
+body.hasbg .idcard{background:rgba(20,16,12,.46)}
+body.hasbg .idcard.st{background:rgba(23,18,39,.5)}
+body.hasbg .idcard.spec{background:rgba(16,16,20,.44)}
+body.hasbg .winbanner{background:rgba(24,18,12,.5)}
+body.hasbg .story-panel{background:rgba(24,18,12,.45)}
+body.hasbg.night .idcard{background:rgba(14,12,26,.5)}
+body.hasbg.night .idcard.st{background:rgba(20,16,40,.55)}
+body.hasbg.night .story-panel{background:rgba(16,13,32,.5)}
+body.hasbg .section h3{border-bottom-color:rgba(255,255,255,.16)}
+body.hasbg.night .section h3{border-bottom-color:rgba(160,148,220,.24)}
