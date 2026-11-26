@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.0';
+var VERSION = '0.13.1';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1681,6 +1681,12 @@ async function refresh(){
   await loadChat(true);
   render();
   if(S.tab==='wiki') loadWiki();
+  /* 作弊页停留时持续拉取说书人日志：它正在思考时也要能一行行看到 */
+  if(S.tab==='cheat' && S.game){
+    var before = S.storyLog ? S.storyLog.length : -1;
+    await loadStoryLog();
+    if (S.storyLog && S.storyLog.length !== before) render(true);
+  }
 }
 setInterval(refresh, 3000);
 /* 每 40 秒随机唤醒一位存活 AI 思考一次（对局进行中、无其它轮次在跑时） */
