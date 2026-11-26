@@ -214,6 +214,10 @@ function listGames(){
 function say(id, seat, text, channel, to){
   const s = loadState(id);
   const ch = channel==='private'?'private':'town';
+  /* 夜晚只允许公开发言：私聊被封禁（含说书人与 Agent） */
+  if (ch==='private' && s.phase==='night') {
+    return { ok:false, error:'夜晚禁止私聊，只能公开发言' };
+  }
   const targets = ch==='private' ? (Array.isArray(to)?to:[to]).filter(x=>x!==undefined&&x!==null) : [];
   if (!Array.isArray(s.messages)) s.messages = [];
   const msg = { t:new Date().toISOString(), from:seat, channel:ch, to:targets, text:String(text||'') };

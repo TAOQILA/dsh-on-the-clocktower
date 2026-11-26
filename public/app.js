@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.7.1';
+var VERSION = '0.7.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[] };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'grimoire', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {grimoire:'魔典',setup:'建局',story:'说书人',chat:'群聊/私聊',log:'日志',wiki:'知识库'};
@@ -188,7 +188,13 @@ function restoreScroll(k){
   var sc = document.scrollingElement || document.documentElement;
   if (sc) sc.scrollTop = k.win;
 }
-function render(){
+function render(force){
+  /* 正在输入时不要重建整页，否则输入框会被销毁、光标丢失 */
+  var ae = document.activeElement;
+  if (!force && ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')){
+    S.pendingRender = true; return;
+  }
+  S.pendingRender = false;
   var keep = capScroll();
   var g = S.game, seats = g?g.seats:S.seats;
   var cur = g?g.phase:'setup';
@@ -562,12 +568,19 @@ function roundSection(){
   var last = (st.results||[]).map(function(r){
     return '<div><b>'+(r.seat+1)+' 号</b>：'+r.say+(r.whispers?('（私聊 '+r.whispers+' 条）'):'')+'</div>';
   }).join('');
-  return '<div class="section"><h3>让 AI 玩家发言</h3>'+
-    '<p class="muted">按座位顺序依次唤醒存活 Agent，前一位说完后一位才看到（顺序即信息）。</p>'+
-    '<div class="row"><button onclick="runRound()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中...':'让所有 AI 玩家发言')+'</button>'+
-    '<button onclick="runRound(3)" '+(st.running?'disabled':'')+'>只让 3 位发言</button></div>'+
+  return '<div class="section"><h3>AI 玩家</h3>'+
+    '<p class="muted">你每发一条公开消息，所有 AI 都会收到，各自决定接不接话（不必每轮都说）。</p>'+
     prog+
     '<div class="log" style="max-height:220px">'+(last||'<div class="muted">本轮尚无发言</div>')+'</div></div>';
+}
+/* 公聊后：唤醒所有存活 Agent，各自决定要不要接话（mode:'react'） */
+async function reactAll(){
+  if(!S.game) return;
+  try { await api('round',{id:S.game.id, mode:'react'}); }
+  catch(e){ S.startError='启动 AI 反应失败：'+((e&&e.message)||e); render(); return; }
+  S.round = await api('roundStatus',{id:S.game.id});
+  render();
+  pollRound();
 }
 async function runRound(limit){
   if(!S.game) return;
@@ -620,7 +633,9 @@ function chatPanel(g){
   var seats = g.seats||[];
   var self = mySeatInGame(g);
   var roChat = !iAmStoryteller(g) && !iAmPlayer(g);
-  var chOpts = opt('town','town（全员可见）',S.chatChannel)+opt('private','private（私聊）',S.chatChannel);
+  var isNight = (g.phase === 'night');
+  if (isNight && S.chatChannel === 'private') S.chatChannel = 'town';
+  var chOpts = opt('town','town（全员可见）',S.chatChannel)+(isNight?'':opt('private','private（私聊）',S.chatChannel));
   var seatOpts = seats.map(function(s,i){ return '<label style="margin-right:8px"><input type="checkbox" class="chtarget" value="'+i+'" '+(S.chatTo.indexOf(i)>=0?'checked':'')+'>'+(i+1)+' 号 · '+s.name+'</label>'; }).join('');
   var msgs = (S.chatMsgs||[]).map(function(m){
     var from = seats[m.from]?seats[m.from].name:((m.from+1)+' 号');
@@ -630,26 +645,28 @@ function chatPanel(g){
   }).join('');
   return '<div class="section"><h3>群聊 / 私聊</h3>'+
     '<p class="muted">当前视角：'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+'。公开频道全员可见；私聊仅收发双方与说书人可见。</p>'+
-    '<div class="row">频道：<select id="chatCh" onchange="S.chatChannel=this.value;render()">'+chOpts+'</select></div>'+
+    '<div class="row">频道：<select id="chatCh" onchange="S.chatChannel=this.value;render()">'+chOpts+'</select>'+(isNight?'<span class="muted">夜晚只能公聊</span>':'')+'</div>'+
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
     (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
-    '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
-    '<div id="chatLog" class="log" style="max-height:360px" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
+    '<div class="row"><input id="chatText" style="flex:1" placeholder="输入消息..." value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
+    '<div id="chatLog" class="log chatlog" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
     '<div id="chatMore" class="chatmore" onclick="jumpChatBottom()" style="display:none"></div>'+
     roundSection()+
     '</div>';
 }
 async function sendChat(){
-  var inp = $('#chatText'); if(!inp||!inp.value.trim()) return;
+  var inp = $('#chatText');
+  var txt = inp ? inp.value : (S.chatDraft || '');
+  if(!txt.trim()) return;
   var to = [];
   if(S.chatChannel==='private'){
     document.querySelectorAll('.chtarget').forEach(function(el){ if(el.checked) to.push(+el.value); });
   }
   var ch = S.chatChannel;
-  await api('say',{id:S.game.id,seat:mySeatInGame(S.game),text:inp.value,channel:ch,to:to});
-  inp.value='';
+  await api('say',{id:S.game.id,seat:mySeatInGame(S.game),text:txt,channel:ch,to:to});
+  S.chatDraft=''; if(inp) inp.value='';
   await loadChat();
-  if (ch === 'town') runRound(3);
+  if (ch === 'town') reactAll();
   else {
     /* 私聊：唤醒收件人 Agent 回一条（不占用其主动私聊名额） */
     if (to.length) api('round',{id:S.game.id, seats:to, replyTo:mySeatInGame(S.game)}).catch(function(){});
@@ -777,8 +794,6 @@ async function loadWiki(){
   }
 }
 async function refresh(){
-  var ae = document.activeElement;
-  if (ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')) return;
   if(!S.game) return;
   S.game = await api('game',gameReq());
   if(!S.round || !S.round.running){

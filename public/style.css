@@ -126,3 +126,5 @@ body.night .wikiback,body.night .wikihead{border-color:var(--edge2)}
 body.night .smno{background:#0a0918;border-color:var(--edge2)}
 .chatmore{margin-top:6px;text-align:center;font-size:12px;color:#120e08;background:var(--gold);border-radius:14px;padding:4px 10px;cursor:pointer;font-weight:700}
 body.night .chatmore{color:#0b0a14;background:#9c8fe0}
+.log.chatlog{max-height:none;height:calc(100vh - 300px);min-height:280px;overflow:auto}
+body.night .log.chatlog{background:#0a0918;border:1px solid #221e3c}

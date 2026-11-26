@@ -224,7 +224,7 @@ function renderMessages(msgs, seats) {
   }).join('\n');
 }
 
-function buildPrompt(id, seat, replyTo) {
+function buildPrompt(id, seat, replyTo, mode) {
   const v = viewFor(id, seat);
   const s = E.loadState(id);
   const lines = [];
@@ -255,6 +255,13 @@ function buildPrompt(id, seat, replyTo) {
   lines.push('【你这一轮要做什么】');
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
     lines.push('有人刚刚私聊了你（见上方对话里的对话）。请用 whisper 私下回复 ' + (Number(replyTo) + 1) + ' 号，不要公开发言（say 留空）。');
+  } else if (mode === 'react') {
+    lines.push('刚才场上有人公开发言（见上方对话最后几条）。你要自己判断要不要接话。');
+    lines.push('- 想接话：在 say 里写一句公开发言（可以质疑、附议、辩护、给信息、拉票）。');
+    lines.push('- 不想接话：say 留空字符串 ""，这一轮就不出现在公屏上。不必每轮都说话，沉默也是策略。');
+    lines.push('不要复述别人刚说过的话；不要为了说话而说话。');
+    if (v.phase === 'night') lines.push('现在是夜晚，只能公开发言，不能私聊。');
+    else lines.push('必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
   } else {
     lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），必要时最多私聊 ' + v.dmQuotaLeft + ' 人。');
   }
@@ -466,7 +473,7 @@ async function runRound(id, opts) {
     try {
       for (const seat of pool) {
         run.current = seat;
-        const built = buildPrompt(id, seat, opts.replyTo);
+        const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
         const route = routeFor(id, seat);
         const out = await callModel({ game: id, seat: seat, prompt: built.prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model });
         const parsed = out.error
@@ -480,10 +487,11 @@ async function runRound(id, opts) {
           const firstWhisper = (parsed.whisper && parsed.whisper.length) ? String(parsed.whisper[0].text || '') : '';
           const back = parsed.say || firstWhisper;
           if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
-        } else if (parsed.say) {
-          E.say(id, seat, parsed.say, 'town');
+        } else if (parsed.say && String(parsed.say).trim()) {
+          E.say(id, seat, String(parsed.say).trim(), 'town');
         }
-        (dmReplyTo >= 0 ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
+        const nightNow = (E.loadState(id).phase === 'night');
+        (dmReplyTo >= 0 || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
           /* 模型给的座位号是 1 起，落库用 0 起 */
           const to = (w.to || []).map(function (n) { return Number(n) - 1; })
             .filter(function (n) { return n >= 0 && n < s.seats.length && n !== seat; });
