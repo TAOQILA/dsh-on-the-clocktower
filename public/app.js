@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.8.7';
+var VERSION = '0.8.8';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -20,7 +20,7 @@ async function api(name, data){
   if (!j.ok) throw new Error(j.error||'request failed');
   return j.data;
 }
-var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, lastPhase:'' };
+var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, lastPhase:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'建局',ai:'AI 设置',game:'游戏',story:'说书人',log:'日志',wiki:'知识库'};
@@ -52,6 +52,7 @@ function savePrefs(){
       storyProvider: S.storyProvider || '',
       storyModel: S.storyModel || '',
       autoChat: S.autoChat !== false,
+      autoStory: S.autoStory !== false,
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
     }));
@@ -69,6 +70,7 @@ function loadPrefs(){
       if (hit) S.script = hit;
     }
     if (typeof o.autoChat === 'boolean') S.autoChat = o.autoChat;
+    if (typeof o.autoStory === 'boolean') S.autoStory = o.autoStory;
     S.storyProvider = o.storyProvider || '';
     S.storyModel = o.storyModel || '';
     if (Array.isArray(o.seats) && o.seats.length >= 5 && o.seats.length <= 30) {
@@ -272,9 +274,9 @@ function render(force){
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   $('#app').innerHTML =
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>'+
-    '<div class="layout"><div class="chatcol">'+ chatPanel(g) +'</div><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
+    '<div class="layout"><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div><div class="left">'+ stBox(g) + specBox() +'<div class="table" id="table">'+
     '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div><div class="story">'+story+'</div></div>'+
-    '</div></div><div class="right">'+ winBanner(g) +'<div class="tabs">'+tabsHtml+'</div>'+ idCard + panel +'</div></div>';
+    '</div></div><div class="chatcol">'+ chatPanel(g) +'</div></div>';
   drawTable(seats,g);
   fitBubbles();
   restoreScroll(keep);
@@ -297,6 +299,12 @@ function fitBubbles(){
     }
     if (el.scrollHeight > el.clientHeight + 1) el.classList.add('clipped');
   }
+}
+/* 本局说书人是否由 Agent 担任 */
+function iAmStorytellerAgent(g){
+  var st = (g && g.storyteller) || null;
+  if (!st) return false;
+  return st.type !== 'player';
 }
 /* 每个座位最近的几条发言：贴在其头像正上方（私聊紫色，公聊普通色） */
 function bubblesFor(seat){
@@ -735,6 +743,15 @@ function humanStoryPanel(seats,sel,roles,phase){
     roundSection();
 }
 /* 让 Agent 说书人主持当前阶段，并轮询结果 */
+/* 自动主持：失败不打断界面，只把错误记在 S.story 里 */
+async function autoRunStory(){
+  if (!S.game) return;
+  S.story = { running:true, result:null, error:null };
+  try { await api('storyRound',{id:S.game.id}); }
+  catch(e){ S.story = { running:false, result:null, error:String((e&&e.message)||e) }; render(); return; }
+  render();
+  pollStory();
+}
 async function runStory(){
   if(!S.game) return;
   try { await api('storyRound',{id:S.game.id}); }
@@ -790,7 +807,8 @@ function roundSection(){
   return '<div class="section"><h3>AI 玩家</h3>'+
     '<p class="muted">你发一条公开消息后，AI 会按座位顺序一位一位地接话：后说的人能听到前面说了什么，所以彼此能顺着聊。每位自己决定接不接。白天夜里都能说话。</p>'+
     '<div class="row"><button onclick="roundSectionStart()" '+(st.running?'disabled':'')+'>让 AI 自己聊一轮</button>'+
-    '<label class="muted"><input type="checkbox" '+(S.autoChat?'checked':'')+' onchange="S.autoChat=this.checked;savePrefs()"> 进入白天时自动讨论</label></div>'+
+    '<label class="muted"><input type="checkbox" '+(S.autoChat?'checked':'')+' onchange="S.autoChat=this.checked;savePrefs()"> 进入白天时自动讨论</label>'+
+    '<label class="muted"><input type="checkbox" '+(S.autoStory!==false?'checked':'')+' onchange="S.autoStory=this.checked;savePrefs()"> 进入夜晚时自动主持</label></div>'+
     prog+
     '<div class="log" style="max-height:220px">'+(last||'<div class="muted">本轮尚无发言</div>')+'</div></div>';
 }
@@ -1085,8 +1103,16 @@ async function refresh(){
   if (S.tab==='story' && !iAmStoryteller(S.game) && !(S.story && S.story.running)){
     try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){}
   }
-  /* 阶段刚翻到白天：自动让 AI 们先聊一轮，免得白天一片死寂 */
-  if (S.game && S.game.phase === 'day' && S.lastPhase !== 'day') {
+  /* 阶段翻转时的自动推进：
+     - 进夜晚：Agent 说书人自动主持这一夜（发私密信息、结算死亡、推进到白天）
+     - 进白天：自动让 AI 们先聊一轮，免得白天一片死寂 */
+  if (S.game && S.game.phase === 'night' && S.lastPhase !== 'night') {
+    S.lastPhase = 'night';
+    if (S.autoStory !== false && iAmStorytellerAgent(S.game)
+        && !(S.story && S.story.running) && !(S.round && S.round.running)) {
+      autoRunStory();
+    }
+  } else if (S.game && S.game.phase === 'day' && S.lastPhase !== 'day') {
     S.lastPhase = 'day';
     if (S.autoChat && canControl() && !(S.round && S.round.running)) reactAll();
   } else if (S.game) {
