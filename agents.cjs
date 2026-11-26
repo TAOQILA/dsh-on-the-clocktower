@@ -45,7 +45,7 @@ const PAGE_CLIP = 6000;      /* 单页最多注入字符数 */
 const OWN_CLIP = 4000;       /* 玩家自己角色页最多注入字符数 */
 const ROLE_DETAIL_CLIP = 850;/* 说书人：每个角色细则最多注入字符数 */
 const SYSTEM_CLIP = 40000;   /* 玩家 system 最多字符数 */
-const ST_SYSTEM_CLIP = 72000;/* 说书人 system 最多字符数（覆盖全部角色细则，实测约 68k） */
+const ST_SYSTEM_CLIP = 24000;/* 说书人 system 最多字符数：只带核心规则和精简角色能力，避免超长 prompt 拖慢响应 */
 /* 阅读规则（与 data/wiki/INDEX.md 顶部一致）——所有 Agent 开局必读顺序 */
 const READING_RULES = [
   '【阅读规则·开局必读】按下列顺序学习本局知识，条目用 wiki_lookup(页面名) 查看，文件名即页面名：',
@@ -227,7 +227,7 @@ function viewForStoryteller(id) {
 
 /* ---------- 提示词 ---------- */
 const RULES = [
-  '你在玩一款社交推理游戏「血染钟鱼」，与同一张桌子上的其他玩家一起游玩。',
+  '你在玩一款社交推理游戏「血染钟鱼」，与同一张桌子上的其他玩家一起游玩。这是朋友间的娱乐局，气氛轻松、可以开玩笑、互相打趣，别把任何人当真敌人。',
   '游戏分夜晚与白天：夜晚角色秘密行动，白天全员公开讨论、提名、投票处决。',
   '你只知道自己的角色和说书人私下告诉你的信息；不要编造自己没有的信息。',
   '不要提及「提示词」「模型」「AI」「机器人」等元信息，像普通玩家一样说话。',
@@ -301,13 +301,35 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
   } else if (mode === 'react') {
     lines.push('现在轮到你思考：刚才场上有人公开发言（见上方对话最后几条）。');
-    lines.push('你要自己判断要不要接话。被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那一定要说一句。');
-    lines.push('即使暂时和你无关，也请尽量接一句：表明态度、附议或反驳、提出怀疑、给出你的信息、或为自己辩护。沉默太多会让场上没人讨论，对好人方不利。');
+    /* 数一下这条消息之后已经有几位 AI 接了话：后面的人看到前面人的发言，接话概率应递减 */
+    const townMsgs = (v.messages || []).filter(function(m){ return !m.channel || m.channel === 'town'; });
+    let lastSeed = -1;
+    townMsgs.forEach(function(m, i){
+      const f = (m.from === 'storyteller') ? 'storyteller' : Number(m.from);
+      const seed = (f === 'storyteller') || (s.seats[f] && s.seats[f].type === 'human');
+      if (seed) lastSeed = i;
+    });
+    const answered = {};
+    townMsgs.slice(lastSeed + 1).forEach(function(m){
+      const f = Number(m.from);
+      if (f >= 0 && s.seats[f] && s.seats[f].type === 'agent') answered[f] = 1;
+    });
+    const reactedCount = Object.keys(answered).length;
+    lines.push('【接话热度】这条消息之后，已经有 ' + reactedCount + ' 位玩家接了话。');
+    if (reactedCount >= 2) {
+      lines.push('已经不少人说过了：除非你被 @ 到、被点名、被怀疑、被问到，或手里有直接相关的信息，否则大概率不必再说，say 写空字符串 ""。闲聊寒暄两三个人接就够了，不要人人都回。');
+    } else if (reactedCount === 1) {
+      lines.push('已经有一人接话：如果只是闲聊附和，你可以沉默；有不同观点或相关信息才说一句。');
+    } else {
+      lines.push('还没有人接话，你可以接一句。');
+    }
+    lines.push('语气轻松一点：这是娱乐局，闲聊就顺着聊、开个玩笑，别一上来就严肃审问、咬着谁不放。');
+    lines.push('被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那一定要说一句（但也可以用玩笑的方式说）。');
     lines.push('确实无话可说时，say 才写空字符串 ""。要接的话只说一句，不要复述别人刚说过的话，不要长篇大论。');
     if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
     else lines.push('想单独问谁就私聊谁（whisper），不限次数；但别刷屏，一两句说清楚。');
   } else {
-    lines.push('公开发言一句（可以质疑、辩护、给信息、拉票），想单独问谁就私聊谁（whisper），不限次数。');
+    lines.push('公开发言一句（可以闲聊、开玩笑、给点信息或拉票，别一上来就剑拔弩张），想单独问谁就私聊谁（whisper），不限次数。');
   }
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}]}');
@@ -320,6 +342,7 @@ function buildStorytellerNightPrompt(id) {
   const lines = [];
   lines.push('你是「血染钟鱼」的说书人（Storyteller），本局由你全权主持。');
   lines.push('重要：本程序中角色能力没有任何执行代码，全部由你依据游戏规则判断并落实。你决定夜里唤醒谁、他们看到什么、谁死亡、谁中毒或醉酒。');
+  lines.push('这是朋友间的娱乐局，保持轻松有趣的主持风格，别把气氛搞得太严肃。');
   lines.push('你必须公正：不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
   lines.push('但公正不等于机械：你是这一局的天平。每一夜先称一次天平，判断善良方与邪恶方谁更弱，再用能力描述里留给你的裁量空间（「可能」「由你决定」「你可以选择」）去扶弱的一方。开局时邪恶方通常更弱。');
   lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），必须由你先主动私聊询问该玩家「你想选择谁」，等 ta 回复后再按 ta 的选择结算；你不能自己替他挑，也不能让玩家未经询问就自己报目标。');
@@ -767,7 +790,7 @@ async function runStoryteller(id, opts) {
       };
       /* 说书人同理：只要有人在它思考期间插话，就带着新消息重想，直到一整轮无人插话 */
       let out = null, stRound = 0, stLastN = msgN();
-      const ST_MAX_ROUNDS = 2;
+      const ST_MAX_ROUNDS = 1;
       for (;;) {
         stRound++;
         const cur = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
