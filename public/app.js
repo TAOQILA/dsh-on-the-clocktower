@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.7.7';
+var VERSION = '0.7.8';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -523,7 +523,7 @@ function seatPanel(seats,sel){
     (S.game?'':' <button onclick="dropMe(\'seat\','+S.selSeat+')">把「你」放到这里</button>')+'</div>'+
     '<div class="row">名字：<input value="'+sel.name+'" onchange="renameSeat(S.selSeat,this.value)"></div>'+
     '<div class="row">模型：'+(sel.type==='human'?'<b>你</b>（无需模型）':modelSelect('seatModelSel',sel.provider,sel.model,'var k=this.value;var q=splitKey(k);saveSeatModel(S.selSeat,q.provider,q.model)'))+'</div>'+
-    speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>';
+    speakPart+'</div><p class="muted">点击围坐圈上的座位可切换选中。每个座位可单独指定模型，留空则跟随默认模型。</p>'+ roundSection();
 }
 function storyPanel(seats,sel,roles,phase){
   if (!S.game) return '<p class="muted">请先在「建局」中创建对局。</p>';
@@ -700,7 +700,11 @@ function chatMsgsHtml(g){
     var from = seats[m.from]?seats[m.from].name:((m.from+1)+' 号');
     var cls = m.channel==='private'?'dm':'town';
     var tag = m.channel==='private'?'私聊':'';
-    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+'：'+esc(m.text)+'</div>';
+    var toTxt = '';
+    if (m.channel==='private' && m.to && m.to.length){
+      toTxt = ' → ' + m.to.map(function(x){ return (x+1)+' 号'+(seats[x]?('·'+seats[x].name):''); }).join('、');
+    }
+    return '<div class="msg '+cls+'"><b>'+from+'</b> '+tag+toTxt+'：'+esc(m.text)+'</div>';
   }).join('');
   return h || '<div class="muted">暂无消息</div>';
 }
@@ -724,14 +728,15 @@ function chatPanel(g){
   var seatOpts = seats.map(function(s,i){ return '<label style="margin-right:8px"><input type="checkbox" class="chtarget" value="'+i+'" '+(S.chatTo.indexOf(i)>=0?'checked':'')+'>'+(i+1)+' 号 · '+s.name+'</label>'; }).join('');
   var msgs = chatMsgsHtml(g);
   return '<div class="chatwrap"><h3>群聊 / 私聊</h3>'+
-    '<p class="chatwho muted">'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+'</p>'+
+    '<p class="chatwho muted">'+(self+1)+' 号'+(seats[self]?'（'+seats[self].name+'）':'')+
+      ((S.game && S.game.alive && S.game.alive[self]===false) ? ' <span class="deadnote">已出局 · 仍可发言</span>' : '')+'</p>'+
     '<div class="row">频道：<select id="chatCh" onchange="S.chatChannel=this.value;render()">'+chOpts+'</select>'+(isNight?'<span class="muted">夜晚只能公聊；当晚得到的信息天亮后才能说</span>':'')+'</div>'+
     (S.chatChannel==='private'?'<div class="row">收件人：<div>'+seatOpts+'</div></div>':'')+
     '<div id="chatLog" class="log chatlog" data-count="'+((S.chatMsgs||[]).length)+'">'+(msgs||'<div class="muted">暂无消息</div>')+'</div>'+
     (roChat ? '<p class="muted">旁观模式：只能阅读对话，不能发言。</p>' :
     '<div class="row chatinput"><input id="chatText" style="flex:1" placeholder="说点什么..." value="'+esc(S.chatDraft||'')+'" oninput="S.chatDraft=this.value" onblur="if(S.pendingRender)render(true)" onkeydown="if(event.key===\'Enter\')sendChat()"><button onclick="sendChat()">发送</button></div>')+
     '<div id="chatMore" class="chatmore" onclick="jumpChatBottom()" style="display:none"></div>'+
-    roundSection()+
+    '<p class="chatnote muted">AI 玩家的发言进度在右侧「魔典」页。</p>'+
     '</div>';
 }
 async function sendChat(){

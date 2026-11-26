@@ -140,3 +140,6 @@ body.night .chatcol{background:radial-gradient(circle at 50% 40%,var(--panel-a),
   .chatcol{min-height:320px}
   .left{min-height:420px}
 }
+.chatnote{font-size:11px;text-align:center;margin:4px 0 0}
+.deadnote{color:#b07c7c;font-weight:700}
+body.night .deadnote{color:#c98f8f}

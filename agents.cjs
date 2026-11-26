@@ -237,6 +237,9 @@ function buildPrompt(id, seat, replyTo, mode) {
   if (v.faction) lines.push('阵营：' + v.faction);
   lines.push('当前：第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天，阶段 ' + v.phase);
   lines.push('');
+  if (!v.alive) {
+    lines.push('【你已经出局】死亡不等于闭嘴：你仍然可以公开发言、参与讨论、质疑别人、给队友递话，也仍然可以投票以外的意见表达。别沉默。');
+  }
   lines.push('【场上】存活：' + (v.aliveList.join('，') || '无'));
   if (v.deadList.length) lines.push('已死亡：' + v.deadList.join('，'));
   if (v.nominations.length) {
@@ -269,7 +272,8 @@ function buildPrompt(id, seat, replyTo, mode) {
   lines.push('');
   lines.push('【你这一轮要做什么】');
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
-    lines.push('有人刚刚私聊了你（见上方对话里的对话）。请用 whisper 私下回复 ' + (Number(replyTo) + 1) + ' 号，不要公开发言（say 留空）。');
+    lines.push('有人刚刚私聊了你（见上方对话最后几条私聊）。请把回话直接写在 say 字段里，系统会私下转达给 ' + (Number(replyTo) + 1) + ' 号，不会公开。');
+    lines.push('say 必须非空：哪怕只是应付一句、反问一句、或者表明态度，也要回话，不要留空。whisper 留空数组即可。');
   } else if (mode === 'react') {
     lines.push('刚才场上有人公开发言（见上方对话最后几条）。');
     lines.push('默认应该接一句：表明态度、提出怀疑、附议别人、给出你的信息，或为自己辩护。');
@@ -447,7 +451,15 @@ function parseReply(raw) {
   };
 }
 
-/* ---------- 玩家 Agent 一轮（串行） ---------- */
+/* 从回包里取「要发出去的那句话」：私聊时 say 与 whisper 都算数 */
+function dialectText(parsed) {
+  const say = (parsed && parsed.say) ? String(parsed.say).trim() : '';
+  if (say) return say;
+  const w = (parsed && parsed.whisper && parsed.whisper.length) ? String(parsed.whisper[0].text || '').trim() : '';
+  return w;
+}
+
+/* ---------- 玩家 Agent 一轮（并发模型调用 / 串行落库） ---------- */
 const RUNNING = new Map();
 const STORY_RUNNING = new Map();
 
@@ -469,7 +481,8 @@ async function runRound(id, opts) {
   const s = E.loadState(id);
   const order = [];
   s.seats.forEach(function (x, i) {
-    if (x.type === 'agent' && s.alive[i] && i !== s.storytellerSeat) order.push(i);
+    /* 已出局的玩家仍然可以说话（规则如此），所以这里不按 alive 过滤 */
+    if (x.type === 'agent' && i !== s.storytellerSeat) order.push(i);
   });
   if (!order.length) return { ok: false, error: '没有可驱动的 Agent 座位' };
   /* limit>0 时只唤醒前 limit 位，用于「让最近说话的几位先接一句」；seats 传入时只唤醒指定座位（私聊回复） */
@@ -514,8 +527,23 @@ async function runRound(id, opts) {
         const nightNow = (E.loadState(id).phase === 'night');
         if (dmReplyTo >= 0) {
           /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
-          const firstWhisper = (parsed.whisper && parsed.whisper.length) ? String(parsed.whisper[0].text || '') : '';
-          const back = parsed.say || firstWhisper;
+          let back = dialectText(parsed);
+          if (!back && !out.error) {
+            /* 模型没答上来时补一次强指令，私聊必须有回音 */
+            try {
+              const built2 = buildPrompt(id, seat, dmReplyTo, opts.mode);
+              const route2 = routeFor(id, seat);
+              const out2 = await callModel({
+                game: id, seat: seat,
+                prompt: built2.prompt + '\n\n【再强调一次】对方在等你回话。say 字段必须填写一句真实的回复，不能空。',
+                system: playerSystem(id, seat), provider: route2.provider, model: route2.model
+              });
+              const p2 = parseReply(out2.text);
+              back = dialectText(p2);
+              /* 把重试结果合进 parsed，保证结果面板与落库一致 */
+              if (back) { parsed.say = back; parsed.think = parsed.think || p2.think; }
+            } catch (e) { /* 重试失败就作罢 */ }
+          }
           if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
         } else if (parsed.say && String(parsed.say).trim()) {
           E.say(id, seat, String(parsed.say).trim(), 'town');
@@ -526,7 +554,14 @@ async function runRound(id, opts) {
             .filter(function (n) { return n >= 0 && n < s.seats.length && n !== seat; });
           if (to.length) E.say(id, seat, w.text, 'private', to);
         });
-        run.results.push({ seat: seat, say: parsed.say, whispers: (parsed.whisper || []).length, think: parsed.think, error: out.error || null });
+        const dmBackFinal = (dmReplyTo >= 0) ? dialectText(parsed) : '';
+        run.results.push({
+          seat: seat,
+          say: (dmReplyTo >= 0) ? dmBackFinal : parsed.say,
+          whispers: (parsed.whisper || []).length,
+          think: parsed.think,
+          error: out.error || ((dmReplyTo >= 0 && !dmBackFinal) ? '私聊没有产生回复' : null)
+        });
       }
       E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位同时思考）');
     } catch (err) {
