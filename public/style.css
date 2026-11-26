@@ -119,3 +119,8 @@ body.night .wikiback,body.night .wikihead{border-color:var(--edge2)}
 .histitem:hover{border-color:var(--gold);color:var(--gold)}
 .histitem.on{border-color:var(--gold);background:rgba(201,162,39,.10);color:var(--gold)}
 .mechip.locked{cursor:default;opacity:.72;box-shadow:none}
+.smgrid{display:grid;grid-template-columns:1fr;gap:6px}
+.smrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.smno{display:inline-block;min-width:20px;text-align:center;font-weight:900;color:var(--gold);background:#0e0c0a;border:1px solid #6b5a3e;border-radius:10px;line-height:16px}
+.smname{min-width:96px;color:var(--parch)}
+body.night .smno{background:#0a0918;border-color:var(--edge2)}

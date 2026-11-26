@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.6.7';
+var VERSION = '0.6.8';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -232,7 +232,8 @@ function setupPanel(){
       '<p class="muted">本局正在进行中（'+S.game.id+'），一局未结束前不能再建新局。</p>'+
       '<div class="row"><button onclick="setTab(\'grimoire\')">回到魔典</button>'+
       '<button onclick="leaveGame()">离开本局，回到建局</button></div>'+
-      '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>';
+      '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>'+
+      seatModelConfig(S.game.seats);
   }
   var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+s.roles.length+'角色）',S.script.name); }).join('');
   var pills = S.seats.map(function(s,i){
@@ -251,7 +252,22 @@ function setupPanel(){
     '<div class="row"><button id="startBtn" onclick="startGame()" '+(S.starting?'disabled':'')+'>'+(S.starting?'正在创建并进入第一夜...':'创建对局并进入第一夜')+'</button></div>'+
     (S.startError?('<div class="errbox">开局失败：'+S.startError+'（可直接重试）</div>'):'')+
     '<p class="muted">默认每个人都是 AI。把「你」放到某个座位，你就成为那位玩家；放到说书人圆圈，你就当说书人；放到旁观席，你就只是看。其余座位都由 Agent 扮演。</p>'+
-    '</div><div class="seatlist">'+pills+'</div>';
+    '</div><div class="seatlist">'+pills+'</div>'+
+    seatModelConfig(S.seats);
+}
+/* 座位模型配置：开局前作用于 S.seats，开局后作用于对局内的 seats，随时可改 */
+function seatModelConfig(seats){
+  if (!seats || !seats.length) return '';
+  var rows = seats.map(function(s,i){
+    var isHuman = S.game ? (s.type==='human') : (meZone()==='seat' && S.me.seat===i);
+    var model = isHuman
+      ? '<span class="muted">你（无需模型）</span>'
+      : modelSelect('smSel'+i, s.provider, s.model, 'var k=this.value;var q=splitKey(k);saveSeatModel('+i+',q.provider,q.model)');
+    return '<div class="smrow"><span class="smno">'+(i+1)+'</span><span class="smname">'+esc(s.name||('座位'+(i+1)))+'</span>'+model+'</div>';
+  }).join('');
+  return '<div class="section"><h3>座位模型配置</h3>'+
+    '<p class="muted">每个座位可单独指定模型；「跟随默认模型」即用 DSH 当前的默认对话模型，改动立刻生效。改名请在「魔典」页点该座位。</p>'+
+    '<div class="smgrid">'+rows+'</div></div>';
 }
 function toggleSeat(i){ dropMe('seat', i); }
 /* 改名：未开局只改内存；已开局连名字一起写回对局 */
