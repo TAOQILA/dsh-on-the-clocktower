@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.11.3';
+var VERSION = '0.11.4';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -38,11 +38,22 @@ async function init(){
   S.script = S.scripts[0];
   S.seats = defaultSeats(7);
   loadPrefs();
+  if (ACTIVE_GAME_ID) {
+    try {
+      var rg = await api('game', { id: ACTIVE_GAME_ID, storyteller: ACTIVE_GAME_ST });
+      if (rg && rg.id) {
+        S.game = rg; syncMeFromGame(rg); S.tab = 'game';
+        try { await loadChat(true); } catch (e3) { /* ignore */ }
+      }
+    } catch (e4) { /* 对局文件没了就忽略 */ }
+  }
   render();
 }
 function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); }
 /* 建局偏好落盘：刷新页面后座位名/模型、说书人模型、剧本都还在 */
 var PREF_KEY = 'ran.prefs.v1';
+var ACTIVE_GAME_ID = '';
+var ACTIVE_GAME_ST = false;
 function savePrefs(){
   try {
     /* 所有建局相关的选择都落盘：剧本、人数（= seats 长度）、每个座位的昵称与模型、
@@ -70,6 +81,8 @@ function savePrefs(){
       bgBlur: (typeof S.bgBlur === 'number' ? S.bgBlur : 7.5),
       bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 20),
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
+      activeGame: S.game ? S.game.id : '',
+      activeGameSt: S.game ? iAmStoryteller(S.game) : false,
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
     }));
   } catch(e){}
@@ -100,6 +113,8 @@ function loadPrefs(){
         return { seat:i, name:String(x.name||('玩家'+(i+1))), type:'agent', provider:x.provider||'', model:x.model||'' };
       });
     }
+    ACTIVE_GAME_ID = o.activeGame || '';
+    ACTIVE_GAME_ST = o.activeGameSt === true;
     /* 恢复「你」上次放在哪（说书人 / 某个座位 / 旁观席） */
     if (o.me && (o.me.zone === 'story' || o.me.zone === 'spectator' || o.me.zone === 'seat')) {
       var ms = Number(o.me.seat) || 0;
@@ -790,6 +805,7 @@ async function startGame(){
     S.game = j.data;
     syncMeFromGame(S.game);
     S.tab='game';
+    savePrefs();
   } catch(e) {
     S.startError = (e && e.message) ? e.message : String(e);
   } finally {
@@ -1360,6 +1376,7 @@ async function sendDm(){
 /* 离开当前对局（不删文件） */
 function leaveGame(){
   S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.chatUnread=0; S.dmUnread=0; S.history=null;
+  savePrefs();
   setTab('setup');
 }
 async function loadChat(skipRender){
@@ -1409,16 +1426,17 @@ async function loadHistory(){
   try { S.history = await api('games'); } catch(e){ S.history = []; }
   render();
 }
-async function openGame(id){
+async function openGame(id, st){
   try {
-    var g = await api('game',{id:id, storyteller:false});
+    var g = await api('game',{id:id, storyteller: st === true});
     if(!g) throw new Error('没有这一局');
     S.game = g; S.selSeat = 0; S.tab = 'game'; S.round = null; S.chatUnread = 0; S.dmUnread = 0;
     syncMeFromGame(g);
+    savePrefs();
     render();
   } catch(e){ alert('打开失败：'+((e&&e.message)||e)); }
 }
-function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; S.chatUnread = 0; S.dmUnread = 0; render(); }
+function closeGame(){ S.game = null; S.round = null; S.tab = 'setup'; S.chatUnread = 0; S.dmUnread = 0; savePrefs(); render(); }
 /* 座位号配色：颜色跟着「座位号」走，不跟人走。换人、改名都不改色。 */
 /* 座位号配色：在色环上平均分配，1 号(i=0)为红色(色相 0)，依次等间隔绕过一圈 */
 function seatColor(i){
