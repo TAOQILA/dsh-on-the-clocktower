@@ -44,7 +44,7 @@ function createGame(cfg){
     storyteller: cfg.storyteller, seats: cfg.seats,
     aiStyle: cfg.aiStyle || 'mild_fun',
     roleMode: cfg.roleMode || 'program',
-    roles: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [],
+    roles: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
     log: [], readAcks: []
   };
   cfg.seats.forEach((s,i)=>{
@@ -102,8 +102,24 @@ function setPhase(id, phase){
   else if (phase==='night') { s.dayStarted = null; }
   /* 换阶段时上一轮投票作废 */
   if (phase!=='day') s.vote = null;
+  const wasNight = (s.phase === 'night');
   s.phase=phase; s.turn++;
   saveState(id,s); log(id,'系统','进入阶段：'+phase+(phase==='night'?'（第'+s.night+'夜）':''));
+  /* 首夜：爪牙得知恶魔、恶魔得知爪牙 + 3 个伪装身份（程序机械下发，说书人不会漏）*/
+  if (phase === 'night' && s.night === 1 && Object.keys(s.roles || {}).length) {
+    try { dealEvilInfo(id); } catch (e) {}
+  }
+  /* 天亮必须由系统公开播报：玩家不该靠猜或翻日志才知道天亮了、谁死了 */
+  if (phase === 'day' && wasNight){
+    const dead = (s.nightDeaths || []).filter(function(i){ return s.seats[i] && !s.alive[i]; });
+    s.nightDeaths = [];
+    saveState(id,s);
+    const nameOf = function(i){ return (i+1)+' 号 '+s.seats[i].name; };
+    let text = '天亮了，第 '+s.day+' 天开始。';
+    if (dead.length) text += '昨夜死亡：' + dead.map(nameOf).join('、') + '。';
+    else text += '昨夜是平安夜，没有人死亡。';
+    say(id,'storyteller',text,'town');
+  }
   return {ok:true,state:s};
 }
 function assignRole(id, seat, role){
@@ -213,6 +229,8 @@ function kill(id, seat, reason){
   if (!(seat >= 0 && seat < s.seats.length)) return {ok:false, error:'座位越界'};
   if (!s.alive[seat]) return {ok:false, error:'该座位已经死亡'};
   s.alive[seat]=false; s.markers[seat].push('死亡');
+  if (!Array.isArray(s.nightDeaths)) s.nightDeaths = [];
+  if (s.nightDeaths.indexOf(seat) < 0) s.nightDeaths.push(seat);
   saveState(id,s);
   log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+' 在夜里死亡'+(reason?('（'+reason+'）'):''));
   const w = checkWin(id);
@@ -321,7 +339,11 @@ function messages(id, viewer, isStoryteller){
     if (m.channel!=='private') return true;
     /* 管理员私聊说书人：只有说书人视角看得到，玩家/旁观者都看不到 */
     if (m.from==='admin' || (Array.isArray(m.to) && m.to.indexOf('admin')>=0)) return !!isStoryteller;
-    if (isStoryteller || m.from===viewer) return true;
+    /* 玩家之间的私聊只有收发双方能看到；说书人只在消息与自己有关时才看得到，
+       否则「私聊 5 号」的内容会被说书人当成发给自己的话 */
+    const involvesSt = (m.from === 'storyteller') || (Array.isArray(m.to) && m.to.indexOf('storyteller') >= 0);
+    if (isStoryteller) return involvesSt;
+    if (m.from===viewer) return true;
     return Array.isArray(m.to) && m.to.indexOf(viewer)>=0;
   });
 }
@@ -414,9 +436,59 @@ function dealRoles(id){
   log(id, '系统', '程序发牌：' + picked.join('、'), true);
   /* 一次把「你的角色是【X】」发给每个人（giveInfo 自带去重，不会重复发） */
   s.seats.forEach(function (x, i) { giveInfo(id, i, '你的角色是【' + picked[i] + '】。'); });
+  /* 首夜机械下发爪牙信息 / 恶魔信息（含 3 个伪装身份）*/
+  dealEvilInfo(id);
   const roster = s.seats.map(function (x, i) { return (i+1) + ' 号 ' + x.name + '：' + picked[i]; });
   return { ok:true, roles: picked, roster: roster };
 }
+/* ---------- 首夜：爪牙信息 / 恶魔信息 ----------
+   规则要求（所有剧本通用）：
+   · 爪牙在首夜得知谁是恶魔；
+   · 恶魔在首夜得知自己有哪些爪牙，并获得 3 个「伪装身份」（本局不在场的善良角色）。
+   这两步由程序机械执行，保证不会漏、也不会被说书人自由发挥掉。 */
+function evilInfoFor(id){
+  const s = loadState(id);
+  const roles = s.roles || {};
+  const minionSeats = [], demonSeats = [];
+  Object.keys(roles).forEach(function(k){
+    const seat = Number(k);
+    const fac = roleFaction(roles[k]);
+    if (fac === 'minion') minionSeats.push(seat);
+    else if (fac === 'demon') demonSeats.push(seat);
+  });
+  return { minionSeats: minionSeats.sort(function(a,b){return a-b;}), demonSeats: demonSeats.sort(function(a,b){return a-b;}) };
+}
+/* 3 个伪装身份：从本剧本里挑 3 个本局不在场的善良角色 */
+function bluffRoles(id){
+  const s = loadState(id);
+  const sc = scriptData(s.script) || {};
+  const g = sc.groups || {};
+  const inPlay = Object.keys((s.roles||{})).map(function(k){ return s.roles[k]; });
+  const pool = (g['镇民']||[]).concat(g['外来者']||[]).filter(function(x){ return inPlay.indexOf(x) < 0; });
+  return shuffle(pool).slice(0, 3);
+}
+/* 首夜把爪牙信息 / 恶魔信息下发给对应座位。重复调用安全（giveInfo 自带去重）*/
+function dealEvilInfo(id){
+  const s = loadState(id);
+  const info = evilInfoFor(id);
+  if (!info.demonSeats.length) return { ok:false, error:'本局还没有恶魔' };
+  const nameOf = function(i){ return (i+1) + ' 号 ' + ((s.seats[i] && s.seats[i].name) || ''); };
+  const demonTxt = info.demonSeats.map(nameOf).join('、');
+  /* 爪牙 → 得知恶魔是谁 */
+  info.minionSeats.forEach(function(m){
+    giveInfo(id, m, '你的同伴是：' + demonTxt + '（恶魔）。夜里不要公开谈论这些。');
+  });
+  /* 恶魔 → 得知爪牙 + 3 个伪装身份 */
+  const minionTxt = info.minionSeats.length ? info.minionSeats.map(nameOf).join('、') : '（本局没有其他爪牙）';
+  const bluffs = bluffRoles(id);
+  const bluffTxt = bluffs.length ? bluffs.join('、') : '（剧本里没有可用的伪装身份）';
+  info.demonSeats.forEach(function(d){
+    giveInfo(id, d, '你的爪牙是：' + minionTxt + '。可以伪装成的三个身份：' + bluffTxt + '。夜里不要公开谈论这些。');
+  });
+  log(id, '系统', '首夜已下发爪牙信息与恶魔信息（伪装身份：' + bluffTxt + '）', true);
+  return { ok:true, minions: info.minionSeats, demons: info.demonSeats, bluffs: bluffs };
+}
+
 function roleInfoByName(name){
   try {
     if (!ROLE_LIST_CACHE) {
@@ -488,4 +560,5 @@ function storyLog(id){
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
-  dealRoles, scriptData, compositionFor, setRoleMode, adminSay };
+  dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
+  evilInfoFor, bluffRoles, dealEvilInfo };

@@ -92,8 +92,16 @@ function buildApi(opts){
   speak: (b) => E.speak(b.id,b.seat,b.text),
   say: (b) => {
     const r = E.say(b.id, b.seat, b.text, b.channel, b.to);
-    /* 每条公聊 / 私聊都同步交给 Agent 说书人思考一次：它可以开口，也可以沉默 */
-    if (r && r.ok && r.message) { try { A.storyReply(b.id, r.message); } catch (e) {} }
+    /* 只有「真的在跟说书人说话」的消息才交给说书人思考：
+       ① 私聊必须是发给说书人的（玩家之间私聊说书人看不到，也不该插话）
+       ② 公聊必须点到说书人（否则说书人不要总在公聊里刷存在感）*/
+    if (r && r.ok && r.message) {
+      const m = r.message;
+      const toSt = (Array.isArray(m.to) && m.to.indexOf('storyteller') >= 0) || m.to === 'storyteller';
+      const addressed = /说书人|主持人|@\s*说书/.test(String(m.text || ''));
+      const need = (m.channel === 'private') ? toSt : addressed;
+      if (need && m.from !== 'storyteller') { try { A.storyReply(b.id, m); } catch (e) {} }
+    }
     return r;
   },
   messages: (b) => ({ messages: E.messages(b.id, b.viewer, !!b.storyteller) }),

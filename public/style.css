@@ -243,6 +243,8 @@ body.night *::-webkit-scrollbar-thumb:hover{background:#4b3f7d;background-clip:c
 .dmtab{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;font-size:12px;line-height:1.5;padding:3px 9px;border:1px solid #6b5a3e;border-radius:12px;background:#1b1610;color:var(--parch);cursor:pointer}
 .dmtab:hover{border-color:var(--gold);color:var(--gold)}
 .dmtab.on{background:#7a68d8;border-color:#a99be0;color:#fff;font-weight:900}
+.dmtab.unread{animation:handlePulse 1.15s ease-in-out infinite;border-color:#ff5a5a}
+.dmtab.unread::after{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff5a5a;margin-left:2px}
 body.night .dmtab{background:#141128;border-color:#463c73;color:#cfc6ff}
 body.night .dmtab.on{background:#7a68d8;border-color:#b7a9ff;color:#0b0a14}
 .dmtarget{display:inline-flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap}

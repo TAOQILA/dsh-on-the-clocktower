@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.8';
+var VERSION = '0.13.9';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false };
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{} };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -346,11 +346,14 @@ function render(force){
   var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
   /* 主面板内容 */
   var sideInner = '<div class="drawerbody" data-keep="right">' + '<div class="tabs">'+tabsHtml+'</div>' + idCard + panel + '</div>';
+  /* 公聊与私聊同时展开时，两者之间额外留出空隙（拉手之外再空 16px），不再贴在一起 */
+  var DMPAD = 16;
   /* 拉手位置：展开面板的拉手贴在自己面板左缘；未展开的拉手保持在屏幕最右侧，不跟着挤到面板左边 */
+  var dmRight = dmOpen ? (chatOpen ? chatW + HAN + DMPAD : 0) : 0;
   var hChatRight, hChatTop = '50%', hDmRight, hDmTop = '50%';
   if (chatOpen && dmOpen) {
     hChatRight = chatW;
-    hDmRight = chatW + HAN + dmW;
+    hDmRight = dmRight + dmW;   /* 私聊拉手：贴在私聊面板的左缘 */
   } else if (chatOpen) {
     hChatRight = chatW;   /* 公聊展开：公聊拉手贴其左缘 */
     hDmRight = 0;         /* 私聊未展开：留在屏幕最右侧 */
@@ -361,7 +364,6 @@ function render(force){
     hChatRight = 0;
     hDmRight = HAN;       /* 两个都收起：并排贴在屏幕最右侧 */
   }
-  var dmRight = dmOpen ? (chatOpen ? chatW + HAN : 0) : 0;
   var dmRound = (chatOpen && dmOpen) ? ' roundright' : '';
   $('#app').innerHTML =
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>' +
@@ -401,13 +403,19 @@ function fitBubbles(){
   for (var i = 0; i < list.length; i++){
     var el = list[i];
     el.classList.remove('clipped');
-    var size = 11;
+    /* 已经量过的气泡直接用记住的字号，不再重新收缩（否则每次 3 秒重建都抖一下）*/
+    var bkey = el.getAttribute('data-bkey') || '';
+    var cached = bkey ? (S.bubFont || {})[bkey] : 0;
+    var size = cached || 11;
     el.style.fontSize = size + 'px';
-    var guard = 0;
-    while ((el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) && size > 7.5 && guard < 20){
-      size -= 0.5;
-      el.style.fontSize = size + 'px';
-      guard++;
+    if (!cached){
+      var guard = 0;
+      while ((el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) && size > 7.5 && guard < 20){
+        size -= 0.5;
+        el.style.fontSize = size + 'px';
+        guard++;
+      }
+      if (bkey){ if (!S.bubFont) S.bubFont = {}; S.bubFont[bkey] = size; }
     }
     if (el.scrollHeight > el.clientHeight + 1) el.classList.add('clipped');
     /* 上下左右都限制在圆桌范围内：贴边时把气泡整体往里推 */
@@ -482,7 +490,11 @@ function bubHtml(m){
   }
   var age = 0;
   try { age = Math.max(0, (Date.now() - new Date(m.t).getTime()) / 1000); } catch(e){ age = 0; }
-  return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'" data-age="'+age.toFixed(1)+'">'+(isDm?'<span class="dmtag">私聊</span>':'')
+  /* 字号由 fitBubbles 量一次后记住：3 秒重建 DOM 时直接复用，避免气泡大小反复跳动 */
+  var bkey = (isDm?'d:':'t:') + String(m.t||'') + ':' + String(m.text||'').length;
+  var cached = (S.bubFont || {})[bkey];
+  var fs = cached ? (' style="font-size:'+cached+'px"') : '';
+  return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'"'+fs+' data-bkey="'+esc(bkey)+'" data-age="'+age.toFixed(1)+'">'+(isDm?'<span class="dmtag">私聊</span>':'')
     + hlMentions(esc(m.text), seatLookup(S.game)) + toTxt + '</div>';
 }
 function stBubbles(){
@@ -1342,14 +1354,21 @@ function insertMention(name){
 }
 
 /* ---------- 消息渲染：按频道分开，公聊 / 私聊各一个侧栏 ---------- */
-function chatMsgsHtml(g, channel){
+function chatMsgsHtml(g, channel, peer){
   if (!g) return '<div class="muted">暂无消息</div>';
   var seats = g.seats || [];
   var lk = seatLookup(g);
   var stName = (g.storyteller && g.storyteller.name) || '说书人';
+  var selfWho = iAmStoryteller(g) ? 'storyteller' : String(mySeatInGame(g));
   var list = (S.chatMsgs || []).filter(function(m){
-    if (!channel) return true;
-    return ((m.channel === 'private') ? 'private' : 'town') === channel;
+    var ch = (m.channel === 'private') ? 'private' : 'town';
+    if (channel && ch !== channel) return false;
+    if (channel === 'private' && peer !== undefined && peer !== null && peer !== ''){
+      /* 私聊按人分栏：只显示「我」与这个对象之间的往来 */
+      var others = [String(m.from)].concat((m.to || []).map(String)).filter(function(x){ return x !== selfWho; });
+      return others.indexOf(String(peer)) >= 0;
+    }
+    return true;
   });
   var h = list.map(function(m){
     var who = (m.from === 'storyteller')
@@ -1418,14 +1437,18 @@ function dmPanel(g){
   var night = (g.phase === 'night');
   var selfIdx = iAmStoryteller(g) ? -1 : mySeatInGame(g);
   var who = '';
+  var unreadBy = S.dmUnreadBy || {};
+  var uTag = function(k){ return unreadBy[k] ? ' unread' : ''; };
   for (var i = 0; i < seats.length; i++){
     if (i === selfIdx) continue;
     var on = S.dmTo.indexOf(String(i)) >= 0;
-    who += '<button type="button" class="dmtab'+(on?' on':'')+'" onclick="pickDmTo(\''+i+'\')">'+(i+1)+' 号 '+esc(seats[i].name)+'</button>';
+    who += '<button type="button" class="dmtab'+(on?' on':'')+uTag(String(i))+'" onclick="pickDmTo(\''+i+'\')">'+(i+1)+' 号 '+esc(seats[i].name)+'</button>';
   }
   if (selfIdx !== -1){
-    who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
+    who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+uTag('storyteller')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
   }
+  /* 当前选中的私聊对象：私聊记录按人分栏，只显示与 ta 的往来 */
+  var dmPeer = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
   var whoTargets = who; /* 夜晚也显示全部玩家标签，只是切到非说书人时不能发送 */
   var nightBlocked = night && (S.dmTo || []).some(function(x){ return x !== 'storyteller'; });
   var dmPlaceholder = nightBlocked ? '夜晚禁止玩家间私聊，只可与说书人私聊。' : '悄悄话…（输入 @ 可以直接 @人）';
@@ -1435,7 +1458,7 @@ function dmPanel(g){
       : (night
         ? '<div class="dmwho"><div class="dmtargets">' + whoTargets + '</div></div>'
         : '<div class="dmwho"><div class="dmtargets">' + who + '</div></div>'))
-    + '<div id="dmLog" class="log chatlog dmLog">' + chatMsgsHtml(g, 'private') + '</div>'
+    + '<div id="dmLog" class="log chatlog dmLog">' + (dmPeer ? chatMsgsHtml(g, 'private', dmPeer) : '<div class="muted">先选一个私聊对象。</div>') + '</div>'
     + (ro ? ''
       : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
     + '<div id="mentionPop-dm" class="mentionpop"></div>'
@@ -1444,6 +1467,7 @@ function dmPanel(g){
 function pickDmTo(v){
   v = String(v);
   S.dmTo = (S.dmTo.length === 1 && S.dmTo[0] === v) ? [] : [v];
+  if (S.dmUnreadBy) delete S.dmUnreadBy[v];
   render(true);
 }
 function toggleDmTo(el){
@@ -1454,7 +1478,7 @@ function toggleDmTo(el){
 }
 function toggleDm(){
   S.showDm = !S.showDm;
-  if (S.showDm) S.dmUnread = 0;
+  if (S.showDm) { S.dmUnread = 0; S.dmUnreadBy = {}; }
   if (S.showDm && !(S.dmTo || []).length && S.game){
     S.dmTo = ['storyteller'];
   }
@@ -1503,7 +1527,7 @@ async function sendDm(){
 }
 /* 离开当前对局（不删文件） */
 function leaveGame(){
-  S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.chatUnread=0; S.dmUnread=0; S.history=null;
+  S.game=null; S.view=null; S.round=null; S.story=null; S.chatMsgs=[]; S.chatUnread=0; S.dmUnread=0; S.dmUnreadBy={}; S.history=null;
   savePrefs();
   setTab('setup');
 }
@@ -1521,7 +1545,16 @@ async function loadChat(skipRender){
     for (var _ui=0; _ui<added.length; _ui++){
       var _m = added[_ui];
       if (String(_m.from) === String(selfWho)) continue;
-      if (_m.channel === 'private'){ if (!S.showDm) S.dmUnread = (S.dmUnread||0)+1; }
+      if (_m.channel === 'private'){
+        S.dmUnread = (S.dmUnread||0)+1;
+        /* 按人记未读：只有不是当前正在看的那个对象时才闪 */
+        var peerKey = String(_m.from === 'storyteller' ? 'storyteller' : _m.from);
+        var cur = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
+        if (!(S.showDm && cur === peerKey)){
+          S.dmUnreadBy = S.dmUnreadBy || {};
+          S.dmUnreadBy[peerKey] = (S.dmUnreadBy[peerKey]||0) + 1;
+        }
+      }
       else { if (S.hideChat) S.chatUnread = (S.chatUnread||0)+1; }
     }
   }
