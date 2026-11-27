@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.23';
+var VERSION = '0.15.24';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -324,12 +324,40 @@ function applyPhaseTheme(){
   document.body.classList.toggle('night', (S.nightTheme !== false) && isNightPhase);
   document.body.classList.toggle('bgnight', isNightPhase);
 }
+/* 重绘后把输入框里没提交的内容和光标位置还回去（id 匹配） */
+function restoreInputs(vals, focusInfo){
+  try {
+    Object.keys(vals || {}).forEach(function(id){
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "range" || el.type === "radio")) return;
+      if (vals[id] !== "" && el.value === "") el.value = vals[id];
+      if (el.tagName === "SELECT" && el.value !== vals[id]) { try { el.value = vals[id]; } catch (e) {} }
+    });
+    if (focusInfo && focusInfo.id) {
+      var fe = document.getElementById(focusInfo.id);
+      if (fe) {
+        try { fe.focus(); } catch (e) {}
+        if (focusInfo.sel && fe.setSelectionRange) { try { fe.setSelectionRange(focusInfo.sel[0], focusInfo.sel[1]); } catch (e) {} }
+      }
+    }
+  } catch (e) {}
+}
 function render(force){
-  /* 正在输入时不要重建整页，否则输入框会被销毁、光标丢失 */
-  var ae = document.activeElement;
-  if (!force && ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.tagName==='SELECT')){
-    S.pendingRender = true; return;
-  }
+  /* 以前只要焦点在输入框里就整体放弃重绘，结果「有人死了」「天黑了」这些状态要手动刷新才看得见。
+     现在照常重绘，但先把输入框里的内容和光标位置记下来，重绘后原样还回去。 */
+  var focusInfo = null;
+  var keepInputs = {};
+  try {
+    var _ae = document.activeElement;
+    if (_ae && (_ae.tagName === "INPUT" || _ae.tagName === "TEXTAREA" || _ae.tagName === "SELECT")) {
+      var _sel = null;
+      try { if (_ae.tagName !== "SELECT") _sel = [_ae.selectionStart, _ae.selectionEnd]; } catch (e) { _sel = null; }
+      focusInfo = { id:_ae.id || "", tag:_ae.tagName, sel:_sel };
+    }
+    var _ins = document.querySelectorAll("input,textarea,select");
+    for (var _ii = 0; _ii < _ins.length; _ii++){ if (_ins[_ii].id) keepInputs[_ins[_ii].id] = _ins[_ii].value; }
+  } catch (e) {}
   S.pendingRender = false;
   var keep = capScroll();
   var g = S.game, seats = g?g.seats:S.seats;
@@ -417,6 +445,7 @@ function render(force){
     drawTable(seats,g);
   fitBubbles();
   restoreScroll(keep);
+  restoreInputs(keepInputs, focusInfo);
 }
 /* 气泡字数太多时自动缩小字号来适应固定大小的气泡：
    从 11px 起逐级降到 7.5px；仍放不下就裁掉剩余内容并加省略号，保证永远不出框。 */
@@ -2444,7 +2473,7 @@ async function refresh(){
     if (S.storyLog && S.storyLog.length !== before) render(true);
   }
 }
-setInterval(refresh, 2500);
+setInterval(function(){ try { Promise.resolve(refresh()).catch(function(){}); } catch (e) {} }, 2500);
 /* 聊天专用快轮询：整页刷新要 2.5 秒，聊天不能等那么久。
    只拉一次 messages 并局部重画，不动整页，所以又便宜又不闪。 */
 var chatPollBusy = false;

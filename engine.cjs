@@ -441,6 +441,14 @@ function say(id, seat, text, channel, to){
   const msg = { t:new Date().toISOString(), from:seat, channel:ch, to:targets, text:String(text||'') };
   s.messages.push(msg);
   saveState(id,s);
+  /* 提名准备度：公聊里说「我准备好进入提名了」就记一笔。
+     AI 的发言是引擎内部直接写的，不走 /api/say，所以以前只有真人能被统计（m12734）。 */
+  try {
+    const _seatN = Number(seat);
+    if (ch === "town" && _seatN >= 0 && _seatN < (s.seats||[]).length && (s.phase === "day" || s.phase === "nomination")) {
+      nomReadyFromChat(id, _seatN, String(text||""));
+    }
+  } catch (e) {}
   /* from / to 都可能是 'storyteller'：说书人不是座位，没有 seats[i] */
   const seatName = (x) => (x==='storyteller') ? ((s.storyteller&&s.storyteller.name)||'说书人')
                        : (s.seats[x] ? s.seats[x].name : ('#'+x));
@@ -2622,9 +2630,16 @@ function nomReadyAll(id){
 /* 从一句公聊里识别「我准备好进入提名了」这类表态 */
 function nomReadyFromChat(id, seat, text){
   const t = String(text||"");
+  if (!t || t.length > 500) return { handled:false };
   if (!/提名/.test(t)) return { handled:false };
-  if (/(不|别|先不|还没|没有|不想|不用).{0,3}(准备|提名)/.test(t)) return { handled:false };
-  if (!/(准备好|准备|可以进|进提名|开始提名|进入提名|随时可以|我同意|同意进入)/.test(t)) return { handled:false };
+  /* 否定、条件句、讨论别人，都不算「我自己准备好了」 */
+  if (/(不|别|先不|还没|没有|不想|不用|不太|暂时不).{0,4}(准备|提名|进)/.test(t)) return { handled:false };
+  if (/(真要|如果|假如|要是|万一|否则|不然|是否|要不要|该不该).{0,8}提名/.test(t)) return { handled:false };
+  const sentence = t.split(/[。！？!?；;\n]/).filter(function(x){ return x.indexOf("提名") >= 0; }).join("。");
+  if (!sentence) return { handled:false };
+  const selfCue = /我[^，,。]{0,10}(准备好|准备|可以|同意|赞成|支持|随时)/.test(sentence);
+  const plain = /(准备好进入提名|准备进入提名|可以进提名|进入提名|开始提名|进提名吧|提名吧|那就提名|直接提名|都准备进入提名|同意进入提名)/.test(sentence);
+  if (!selfCue && !plain) return { handled:false };
   const r = nomSetReady(id, seat, true);
   return { handled:true, ready:r };
 }

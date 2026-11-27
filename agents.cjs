@@ -1860,9 +1860,13 @@ async function runNomination(id, opts){
         /* ---- 处理队列（真人在提问阶段也可能自己提名，所以以队列是否有货为准）---- */
         for (;;) {
           const stQ = E.nomState(id);
-          if (!stQ.ok || !stQ.nom.queue.length) break;
-          const nx = E.nomNext(id);
-          if (!nx.ok) break;
+          if (!stQ.ok) break;
+          /* 上一项结束时 nomClose 可能已经把队列里的下一项直接提成 cur：
+             这时队列是空的、但还有一项没处理，只按 queue 判断会把后面的提名整项丢掉（m12764）。 */
+          let nx = null;
+          if (stQ.nom && stQ.nom.cur) nx = { ok:true, cur:stQ.nom.cur };
+          else if (stQ.nom && stQ.nom.queue && stQ.nom.queue.length) nx = E.nomNext(id);
+          if (!nx || !nx.ok) break;
           anyNom = true;
           const c = nx.cur;
           run.cur = { from:c.from, target:c.target };
