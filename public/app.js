@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.3';
+var VERSION = '0.13.4';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -345,7 +345,7 @@ function render(force){
   var HAN = 30; /* 抽屉拉手宽度 + 间距 */
   var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
   /* 主面板内容 */
-  var sideInner = '<div class="drawerbody" data-keep="right">' + winBanner(g) + '<div class="tabs">'+tabsHtml+'</div>' + idCard + panel + '</div>';
+  var sideInner = '<div class="drawerbody" data-keep="right">' + '<div class="tabs">'+tabsHtml+'</div>' + idCard + panel + '</div>';
   /* 拉手位置：展开面板的拉手贴在自己面板左缘；未展开的拉手保持在屏幕最右侧，不跟着挤到面板左边 */
   var hChatRight, hChatTop = '50%', hDmRight, hDmTop = '50%';
   if (chatOpen && dmOpen) {
@@ -367,10 +367,13 @@ function render(force){
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>' +
     '<div class="layout'+(sideOpen?' side-open':'')+(chatOpen?' chat-open':'')+(dmOpen?' dm-open':'')+'">' +
       '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
-        '<div class="center-badge"><div class="phase">'+(PHZH[cur]||cur)+'</div>'+
-        '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
-        '<div class="story">'+story+'</div>'+
-        ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')+
+        '<div class="center-badge">'+
+        ((g && g.win && g.win.over) ? winBanner(g) : (
+          '<div class="phase">'+(PHZH[cur]||cur)+'</div>'+
+          '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
+          '<div class="story">'+story+'</div>'+
+          ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')
+        ))+
         '</div>'+
       '</div></div>' +
       /* 左侧栏：抽屉，覆盖在圆桌上方 */
@@ -997,12 +1000,12 @@ function cheatPanel(seats, sel){
   h += '<div class="cheatgrp"><h4>死亡与终局</h4>'+
     '<div class="row"><button onclick="if(confirm(\'确定处决该座位？处决后会立刻进入夜晚。\'))api(\'execute\',{id:S.game.id,seat:S.selSeat}).then(refresh)">处决该座位（立刻入夜）</button></div>'+
     '<div class="row"><button onclick="if(confirm(\'确定杀死该座位？普通死亡不会立刻入夜。\'))api(\'kill\',{id:S.game.id,seat:S.selSeat,reason:\'作弊杀死\'}).then(refresh)">杀死该座位（不立即入夜）</button></div>'+
-    '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
-    '<input id="winReason" class="smname-input" placeholder="原因（可选）">'+
-    '<button onclick="if(confirm(\'确定宣布本局结束？说书人会先发复盘再终局。\'))doEndGame()">宣布终局</button></div></div>';
-  h += '<div class="cheatgrp"><h4>以管理员身份私聊说书人</h4>'+
-    '<div class="row"><input id="adminSay" class="smname-input" placeholder="只有说书人能看到这句话；它会考虑并回复你">'+
-    '<button onclick="adminSay()">发送</button></div>'+
+    '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
+    '<input id="winReason" class="smname-input" placeholder="原因（可选）">'+
+    '<button onclick="if(confirm(\'确定宣布本局结束？说书人会先发复盘再终局。\'))doEndGame()">宣布终局</button></div></div>';
+  h += '<div class="cheatgrp"><h4>以管理员身份私聊说书人</h4>'+
+    '<div class="row"><input id="adminSay" class="smname-input" placeholder="只有说书人能看到这句话；它会考虑并回复你">'+
+    '<button onclick="adminSay()">发送</button></div>'+
     '<div class="muted">用于直接向 Agent 说书人下达裁定、询问状态或纠错，不会出现在公聊。</div></div>';
   h += '<div class="cheatgrp"><h4>说书人日志</h4>'+ storyLogHtml() +'</div>';
   h += '</div>';
@@ -1015,13 +1018,13 @@ async function cheatSpeak(){
   inp.value=''; await loadChat(); render();
 }
 async function cheatRound(){ await reactAll(); }
-async function cheatStory(){ await runStory(); }
-async function adminSay(){
-  var inp = document.getElementById('adminSay'); if(!inp) return;
-  var txt = (inp.value||'').trim(); if(!txt) return;
-  try { var r = await api('adminSay',{id:S.game.id, text:txt}); if(r&&r.ok===false) S.startError=r.error; }
-  catch(e){ S.startError=String((e&&e.message)||e); }
-  inp.value=''; await loadStoryLog(); await loadChat(); render(true);
+async function cheatStory(){ await runStory(); }
+async function adminSay(){
+  var inp = document.getElementById('adminSay'); if(!inp) return;
+  var txt = (inp.value||'').trim(); if(!txt) return;
+  try { var r = await api('adminSay',{id:S.game.id, text:txt}); if(r&&r.ok===false) S.startError=r.error; }
+  catch(e){ S.startError=String((e&&e.message)||e); }
+  inp.value=''; await loadStoryLog(); await loadChat(); render(true);
 }
 /* 说书人日志：把它的完整思考与操作按时间顺序摊开，作弊页实时查看 */
 function storyLogHtml(){

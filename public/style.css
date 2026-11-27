@@ -359,3 +359,9 @@ body.night .cheatgrp{border-color:var(--edge2);background:rgba(255,255,255,.04)}
 .stlogk{flex:0 0 auto;color:var(--gold);font-weight:700;min-width:34px}
 .stlogx{flex:1 1 auto;color:var(--parch);white-space:pre-wrap;word-break:break-word}
 body.night .stlog{background:rgba(255,255,255,.04)}
+/* 终局横幅放在圆桌中心：盖住阶段徽记，字号与边框都放大一档 */
+.center-badge .winbanner{margin:0;padding:14px 22px;border-width:2px;background:rgba(29,23,16,.92);min-width:220px}
+.center-badge .winbanner .wintitle{font-size:24px;letter-spacing:2px;margin-bottom:6px}
+.center-badge .winbanner .muted{font-size:12px;line-height:1.6}
+body.night .center-badge .winbanner{background:rgba(20,17,40,.92)}
+body.hasbg .center-badge .winbanner{background:rgba(29,23,16,.86)}
