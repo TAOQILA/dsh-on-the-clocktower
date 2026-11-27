@@ -380,6 +380,7 @@ function buildPrompt(id, seat, replyTo, mode) {
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
     lines.push('说书人（或另一位玩家）刚刚私聊了你（见上方对话最后几条私聊），这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
+    lines.push('【回答要明确】如果对方问的是「你要选谁 / 你要看谁 / 你要毒谁 / 谁是你要保护的人」这类问题，回答里必须点出明确的座位或名字（例："我选择 3 号 @长庚"）。不要只说「我想想」「再看看」「听天由命」这种没有指向的话，也不要反问对方。你的能力在夜里只能通过这句回答生效。');
   } else if (mode === 'react') {
     lines.push('现在轮到你思考：刚才场上有人公开发言（见上方对话最后几条）。');
     /* 数一下这条消息之后已经有几位 AI 接了话：后面的人看到前面人的发言，接话概率应递减 */
@@ -1148,7 +1149,8 @@ function buildNomPrompt(id, seat, kind, extra){
     lines.push('请决定你要不要举手赞成处决他。举手就是公开支持今天处决这个人。');
     lines.push('判断依据：你信不信他的身份、他的死对哪一方有利、你自己会不会因此暴露。想清楚再举手，别随大流。');
     if (extra.dead) lines.push('注意：你已经出局，这一票是你的死亡票，投出去就没有了（除非你复活）。');
-    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","hand":true或false,"say":"可选，一句公开表态，不想说就留空"}');
+    lines.push('【举手方式】举手只由 hand 字段决定，圆桌上会用 ✋ 显示，不需要也不允许用发言说出「我举手 / 我投票」这类话——投票阶段没有公开发言的环节。');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","hand":true或false,"say":"留空字符串即可"}');
   }
   return { prompt: lines.join('\n'), view: v };
 }
@@ -1281,7 +1283,7 @@ async function runNomination(id, opts){
             if (!r || r.error) return;
             const hand = !!(r.obj && r.obj.hand === true);
             E.nomHand(id, i, hand);
-            if (r.parsed && r.parsed.say && String(r.parsed.say).trim()) E.say(id, i, String(r.parsed.say).trim(), 'town');
+            /* 举手只在圆桌上用 ✋ 表示，不占用公聊发言：投票阶段其他人也不能公开发言 */
           });
           if (humanSeats.length) {
             /* 等真人点完举手（前端 nomHand），最多 NOM_ASK_WAIT_MS */

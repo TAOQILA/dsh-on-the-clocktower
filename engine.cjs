@@ -403,6 +403,16 @@ function say(id, seat, text, channel, to){
     const toSt = seat==='storyteller' || targets.indexOf('storyteller')>=0;
     if (!toSt) return { ok:false, error:'夜晚禁止玩家间私聊，只可与说书人私聊' };
   }
+  /* 正式处理一项提名时（被提名发言 / 投票 / 读票），只有提名者、被提名者和说书人可以公开发言 */
+  if (ch==='town' && (s.phase==='nomination' || s.phase==='vote') && s.nom && s.nom.cur) {
+    const st0 = String(s.nom.stage || '');
+    if (st0==='defense' || st0==='vote' || st0==='clock') {
+      const okSeat = (seat==='storyteller')
+        || (Number(seat)===Number(s.nom.cur.from))
+        || (Number(seat)===Number(s.nom.cur.target));
+      if (!okSeat) return { ok:false, error:'正在处理一项提名：此时只有提名者、被提名者和说书人可以公开发言' };
+    }
+  }
   if (!Array.isArray(s.messages)) s.messages = [];
   const msg = { t:new Date().toISOString(), from:seat, channel:ch, to:targets, text:String(text||'') };
   s.messages.push(msg);
@@ -1386,6 +1396,36 @@ function setNomCfg(id, cfg){
   return { ok: true, nomCfg: s.nomCfg };
 }
 
+/* ---- 从公聊文本里识别「我提名 X」：让玩家不用点按钮、也不用 @说书人 ----
+   返回 { ok, handled, target?, error? }。handled=false 表示这句不是提名，交回给别的逻辑。 */
+function nomTryFromChat(id, from, text){
+  const s = loadState(id);
+  const t = String(text||'').trim();
+  if (!t) return { ok:false, handled:false };
+  if (!/提名/.test(t)) return { ok:false, handled:false };
+  if (/不提名|别提名|不要提名|没有提名|没人提名|暂不提名|不打算提名|先不提名/.test(t)) return { ok:false, handled:false };
+  const me = Number(from);
+  if (!(me >= 0 && me < (s.seats||[]).length)) return { ok:false, handled:false };
+  const seats = s.seats || [];
+  let target = -1;
+  /* ① @昵称（长名优先，避免「小明」抢在「小明明」前面） */
+  seats.map(function(x,i){ return { i:i, n:String((x&&x.name)||'') }; })
+    .filter(function(x){ return x.n; })
+    .sort(function(a,b){ return b.n.length - a.n.length; })
+    .forEach(function(x){ if (target < 0 && t.indexOf('@' + x.n) >= 0) target = x.i; });
+  /* ② 「N 号」/「N号」 */
+  if (target < 0) {
+    const m = t.match(/(\d{1,2})\s*号/);
+    if (m) { const k = Number(m[1]) - 1; if (k >= 0 && k < seats.length) target = k; }
+  }
+  if (target < 0) return { ok:false, handled:false, error:'没看出你要提名谁：请写「我提名 N 号」或「我提名 @昵称」' };
+  /* 进入提名阶段（白天才允许） */
+  if (s.phase === 'day') { try { setPhase(id, 'nomination'); } catch (err) {} }
+  const r = nomPropose(id, me, target, t);
+  if (r && r.ok) return { ok:true, handled:true, target:target, queue:r.queue };
+  return { ok:false, handled:true, error:(r && r.error) || '提名失败' };
+}
+
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
@@ -1395,4 +1435,4 @@ module.exports = { createGame, createAndStart, setSeatModel, loadState, saveStat
   revive, forceRole, setApparent, setAlignment, setShield, clearShield, markUsed, isUsed, swapSeats, setMarker, clearMarker,
   grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf,
   nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked,
-  dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT };
+  dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat };

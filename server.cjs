@@ -93,7 +93,33 @@ function buildApi(opts){
   info: (b) => E.giveInfo(b.id,b.seat,b.text),
   speak: (b) => E.speak(b.id,b.seat,b.text),
   say: (b) => {
+    /* 「/管理员 内容」= 最高权限指令：不当作普通聊天，转成管理员私聊直接下达给说书人，
+       并要求说书人如实回答、按指令操作。公聊里只留一行提示，不泄露管理员问了什么。 */
+    const adminText = String(b.text || '').match(/^\s*[\/／]\s*管理员[\s:：,，]*([\s\S]*)$/);
+    if (adminText) {
+      const q = adminText[1].trim();
+      if (q) {
+        try {
+          const ar = E.adminSay(b.id, q);
+          E.say(b.id, b.seat === 'storyteller' ? 'storyteller' : b.seat, '（向说书人下达了管理员指令）', 'town');
+          try { if (ar && ar.message) A.storyReply(b.id, ar.message); } catch (e) {}
+          return { ok: true, admin: true, message: ar && ar.message };
+        } catch (e) {}
+      }
+    }
     const r = E.say(b.id, b.seat, b.text, b.channel, b.to);
+    /* 公聊里直接说「我提名 X」：由引擎解析并真正发起提名，不再指望说书人自己记账。
+       提名一旦进入引擎，之后就说书人主持流程，别让 LLM 再自由发挥一遍。 */
+    if (r && r.ok && r.message && r.message.channel === 'town' && r.message.from !== 'storyteller') {
+      try {
+        const np = E.nomTryFromChat(b.id, r.message.from, r.message.text);
+        if (np && np.handled) {
+          if (!np.ok && np.error) E.say(b.id, 'storyteller', np.error, 'town');
+          else if (np.ok) { try { A.runNomination(b.id, {}); } catch (e) {} }
+          return r;
+        }
+      } catch (e) {}
+    }
     /* 只有「真的在跟说书人说话」的消息才交给说书人思考：
        ① 私聊必须是发给说书人的（玩家之间私聊说书人看不到，也不该插话）
        ② 公聊必须点到说书人（否则说书人不要总在公聊里刷存在感）*/

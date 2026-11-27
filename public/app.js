@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.4';
+var VERSION = '0.15.5';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, dmView:'list', nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
   nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
@@ -271,6 +271,9 @@ function capScroll(){
     k.chatBottom = (cl.scrollHeight - cl.scrollTop - cl.clientHeight) < 28;
     k.chatCount = cl.getAttribute('data-count') !== null ? +cl.getAttribute('data-count') : -1;
   }
+  /* 私聊框同理：贴底就继续贴底，往上翻过就停在原处（不然每次重建都弹回顶部） */
+  var dl = document.getElementById('dmLog');
+  if (dl) k.dmBottom = (dl.scrollHeight - dl.scrollTop - dl.clientHeight) < 28;
   return k;
 }
 function jumpChatBottom(){
@@ -285,7 +288,7 @@ function restoreScroll(k){
     var el = nodes[i];
     var key = el.getAttribute('data-keep');
     if (k.boxes[key] === undefined) continue;
-    if (key === 'chatLog') continue;
+    if (key === 'chatLog' || key === 'dmLog') continue;
     el.scrollTop = k.boxes[key];
   }
   var cl = document.getElementById('chatLog');
@@ -301,6 +304,11 @@ function restoreScroll(k){
         if (m){ m.style.display = 'block'; m.textContent = '有 ' + (cnt - S.chatSeen) + ' 条新消息 ↓'; }
       }
     }
+  }
+  var dl2 = document.getElementById('dmLog');
+  if (dl2){
+    if (k.dmBottom === false) dl2.scrollTop = k.boxes['dmLog'] || 0;
+    else dl2.scrollTop = dl2.scrollHeight;
   }
   var sc = document.scrollingElement || document.documentElement;
   if (sc) sc.scrollTop = k.win;
@@ -505,7 +513,7 @@ function drawTable(seats,g){
     var nc = nomCur();
     var handUp = !!(nc && nc.hands && nc.hands[i] === true);
     var bub = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
-    el.innerHTML = (bub ? '<div class="bubbles">'+bub+'</div>' : '') +
+    el.innerHTML = '<div class="bubbles">'+bub+'</div>' +
       '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
       '<div class="nameline"><div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
@@ -923,7 +931,8 @@ function pollNom(){
   S.nomPolling = true;
   setTimeout(async function(){
     try { await loadNom(); } catch(e) {}
-    render();
+    var sigN = pageSig();
+    if (sigN !== S.pageSig) { S.pageSig = sigN; render(); }
     if (S.game && nomActive()) pollNom(); else S.nomPolling = false;
   }, 900);
 }
@@ -1012,6 +1021,9 @@ function nomPanel(){
   var iLive = !!(S.game && S.game.alive && S.game.alive[mySeat]);
   var usedNom = !!(n.usedNom && n.usedNom[mySeat]);
   var asked = !!(n.asked && n.asked[mySeat]);
+  if (stage === 'ask'){
+    h += '<div class="muted">也可以直接在公聊里说「我提名 N 号，理由是…」，引擎会替你发起提名。</div>';
+  }
   if (stage === 'ask' && control && iAmPlayer(S.game) && iLive && !usedNom && !asked){
     var opts = '';
     for (var i=0;i<seats.length;i++){
@@ -1032,12 +1044,14 @@ function nomPanel(){
   }
   if (stage === 'vote' && cur && control && iAmPlayer(S.game)){
     var myHand = cur.hands ? cur.hands[mySeat] : undefined;
-    if (myHand === undefined){
-      h += '<div class="row nomvote"><button onclick="doNomHand(true)">举手赞成</button><button onclick="doNomHand(false)">不举手</button></div>';
-    } else {
-      h += '<div class="muted">你已经' + (myHand ? '举手赞成' : '没有举手') + '。</div>';
-      h += '<div class="row nomvote"><button onclick="doNomHand(true)">改为举手</button><button onclick="doNomHand(false)">改为不举手</button></div>';
-    }
+    h += '<div class="nomvotebox">';
+    h += '<div class="nomvotecur">' + (myHand === undefined ? '轮到你决定：要不要举手赞成处决 ' + names(cur.target) + '？'
+      : (myHand ? '你已举手赞成（✋）' : '你已选择不举手（✊）')) + '</div>';
+    h += '<div class="row nomvote">'
+      + '<button class="nomhand-up' + (myHand === true ? ' on' : '') + '" onclick="doNomHand(true)">✋ 举手赞成</button>'
+      + '<button class="nomhand-down' + (myHand === false ? ' on' : '') + '" onclick="doNomHand(false)">✊ 不举手</button>'
+      + '</div>'
+      + '<div class="muted">举手会直接显示在圆桌上；点错了可以随时改，时钟转过你才会被锁定。</div></div>';
   }
   if ((stage === 'vote' || stage === 'clock') && cur && cur.order && cur.order.length){
     var ptr = (typeof cur.ptr === 'number') ? cur.ptr : -1;
@@ -1170,7 +1184,8 @@ function pollStory(){
   if(!S.game) return;
   setTimeout(async function(){
     try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){ S.story = {running:false,error:String((e&&e.message)||e)}; }
-    render();
+    var sg = pageSig();
+    if (sg !== S.pageSig) { S.pageSig = sg; render(); } else paintChatIfNeeded();
     if (S.story && S.story.running) pollStory(); else refresh();
   }, 1500);
 }
@@ -1488,7 +1503,9 @@ function pollRound(){
   if(!S.round || !S.round.running) return;
   setTimeout(async function(){
     try { S.round = await api('roundStatus',{id:S.game.id}); } catch(e){ return; }
-    render();
+    /* 只有页面结构真的变了才重建，否则每个 AI 说一句话就整页重绘一次，看起来就是抽搐 */
+    var sg = pageSig();
+    if (sg !== S.pageSig) { S.pageSig = sg; render(); } else paintChatIfNeeded();
     if(S.round.running) pollRound(); else refresh();
   }, 1200);
 }
@@ -1506,6 +1523,26 @@ function iAmPlayer(g){
 }
 function iAmSpectator(g){ return !!g && !iAmStoryteller(g) && !iAmPlayer(g); }
 /* 观战/历史回看：只读 */
+/* 页面指纹：只有它变了才重建整页，避免每 3 秒无脑重建造成闪烁/抽搐 */
+function pageSig(){
+  var g = S.game;
+  if (!g) return 'setup|' + (S.tab||'') + '|' + ((S.seats||[]).length) + '|' + (S.script && S.script.name || '');
+  var parts = [g.id, g.phase, g.day, g.night, S.tab||'', (S.selSeat|0)];
+  parts.push((g.alive||[]).map(function(x){ return x?1:0; }).join(''));
+  /* 消息条数不进指纹：新消息只重画聊天区与座位气泡（paintChatIfNeeded），
+     否则每来一句话都要整页重建，看起来就是抽搐 */
+  parts.push(String((S.round && S.round.running) ? 1 : 0) + (S.round && S.round.done || 0));
+  parts.push(String((S.story && S.story.running) ? 1 : 0));
+  var n = (S.nom && S.nom.nom) ? S.nom.nom : null;
+  parts.push(n ? (String(n.stage||'') + '|' + (n.cur ? (n.cur.from+'-'+n.cur.target+'-'+(n.cur.ptr)) : '-') + '|' + ((n.queue||[]).length) + '|' + ((n.results||[]).length)) : 'non');
+  parts.push(S.showDm ? '1' : '0', S.hideChat ? '1' : '0', S.hideSide ? '1' : '0');
+  parts.push(String((S.dmTo||[]).join(',')), S.dmView||'list');
+  parts.push(String((S.storyLog||[]).length));
+  parts.push(String(S.startError||'').length);
+  var _un = 0; if (S.dmUnreadBy) for (var _k in S.dmUnreadBy) _un += (S.dmUnreadBy[_k]||0);
+  parts.push(String(_un), String((S.dmUnreadBy && Object.keys(S.dmUnreadBy).length) || 0), String(S.chatUnread||0));
+  return parts.join('#');
+}
 function canControl(){
   if (!S.game) return true;
   if (S.game.win && S.game.win.over) return false; // 终局后一切操作只读
@@ -1661,6 +1698,24 @@ function chatMsgsHtml(g, channel, peer){
   }).join('');
   return h || '<div class="muted">' + (channel === 'private' ? '还没有私聊。' : '暂无消息') + '</div>';
 }
+/* 页面结构没变、但聊天内容变了：只重画聊天区与座位气泡，不动整页 */
+function paintChatIfNeeded(){
+  var sig = String((S.chatMsgs||[]).length);
+  if (S.paintChatSig === sig) return;
+  S.paintChatSig = sig;
+  paintChat();
+  if (S.showDm && S.dmView === 'chat') paintDm();
+  var tbl = document.getElementById('table');
+  if (tbl && S.game) {
+    var seats = S.game.seats || [];
+    seats.forEach(function(s,i){
+      var el = document.querySelector('.seat[data-zone="seat:'+i+'"] .bubbles');
+      if (!el) return;
+      var h = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
+      if (el.innerHTML !== h) el.innerHTML = h;
+    });
+  }
+}
 function paintChat(){
   var cl = document.getElementById('chatLog');
   if (!cl) return;
@@ -1710,38 +1765,83 @@ function dmPanel(g){
   var ro = !iAmStoryteller(g) && !iAmPlayer(g);
   var night = (g.phase === 'night');
   var selfIdx = iAmStoryteller(g) ? -1 : mySeatInGame(g);
-  var who = '';
   var unreadBy = S.dmUnreadBy || {};
-  var uTag = function(k){ return unreadBy[k] ? ' unread' : ''; };
-  for (var i = 0; i < seats.length; i++){
-    if (i === selfIdx) continue;
-    var on = S.dmTo.indexOf(String(i)) >= 0;
-    who += '<button type="button" class="dmtab'+(on?' on':'')+uTag(String(i))+'" onclick="pickDmTo(\''+i+'\')">'+(i+1)+' 号 '+esc(seats[i].name)+'</button>';
-  }
-  if (selfIdx !== -1){
-    who += '<button type="button" class="dmtab'+(S.dmTo.indexOf('storyteller')>=0?' on':'')+uTag('storyteller')+'" onclick="pickDmTo(\'storyteller\')">说书人</button>';
-  }
-  /* 当前选中的私聊对象：私聊记录按人分栏，只显示与 ta 的往来 */
   var dmPeer = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
-  var whoTargets = who; /* 夜晚也显示全部玩家标签，只是切到非说书人时不能发送 */
-  var nightBlocked = night && (S.dmTo || []).some(function(x){ return x !== 'storyteller'; });
-  var dmPlaceholder = nightBlocked ? '夜晚禁止玩家间私聊，只可与说书人私聊。' : '悄悄话…（输入 @ 可以直接 @人）';
+  var view = (S.dmView === 'chat' && dmPeer) ? 'chat' : 'list';
+  var peerName = function(k){
+    if (k === 'storyteller') return '说书人';
+    var i = Number(k);
+    return (i + 1) + ' 号 ' + ((seats[i] || {}).name || '');
+  };
+  /* ---- 会话列表：像微信的「聊天」页，点一个人就进入和 ta 的对话 ---- */
+  if (view === 'list'){
+    var rows = '';
+    var lastOf = function(k){
+      var arr = (S.chatMsgs || []).filter(function(m){
+        if (m.channel !== 'private') return false;
+        var selfWho = iAmStoryteller(g) ? 'storyteller' : String(mySeatInGame(g));
+        var others = [String(m.from)].concat((m.to || []).map(String)).filter(function(x){ return x !== selfWho; });
+        return others.indexOf(String(k)) >= 0;
+      });
+      return arr.length ? arr[arr.length - 1] : null;
+    };
+    /* 说书人排在最上面：最常聊的就是 ta */
+    if (selfIdx !== -1) rows += dmConvRow('storyteller', '说书人', lastOf('storyteller'), unreadBy['storyteller']);
+    for (var i = 0; i < seats.length; i++){
+      if (i === selfIdx) continue;
+      rows += dmConvRow(String(i), peerName(i), lastOf(String(i)), unreadBy[String(i)]);
+    }
+    return '<div class="dmcol"><div class="dmhead"><b>私聊</b></div>'
+      + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>' : '')
+      + '<div class="dmlist">' + (rows || '<div class="muted">还没有可以私聊的人。</div>') + '</div>'
+      + '</div>';
+  }
+  /* ---- 单个会话：标题栏 + 返回按钮，像微信的对话页 ---- */
+  var nightBlocked = night && dmPeer !== 'storyteller';
+  var dmPlaceholder = nightBlocked ? '夜晚禁止玩家间私聊，只可与说书人私聊。' : '发消息…';
   var dmDis = nightBlocked ? ' disabled' : '';
-  return '<div class="dmcol"><div class="dmhead"><b>私聊</b></div>'
+  return '<div class="dmcol"><div class="dmhead dmchathead">'
+    + '<button class="dmback" onclick="backDmList()" title="返回私聊列表">‹</button>'
+    + '<b>' + esc(peerName(dmPeer)) + '</b></div>'
+    + '<div id="dmLog" class="log chatlog dmLog" data-keep="dmLog">' + chatMsgsHtml(g, 'private', dmPeer) + '</div>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
-      : (night
-        ? '<div class="dmwho"><div class="dmtargets">' + whoTargets + '</div></div>'
-        : '<div class="dmwho"><div class="dmtargets">' + who + '</div></div>'))
-    + '<div id="dmLog" class="log chatlog dmLog">' + (dmPeer ? chatMsgsHtml(g, 'private', dmPeer) : '<div class="muted">先选一个私聊对象。</div>') + '</div>'
-    + (ro ? ''
-      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\x27dm\x27)" onfocus="S.activeInput=\x27dm\x27" onblur="blurInput()" onkeydown="chatKey(event,\x27dm\x27)"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
+      : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\'dm\')" onfocus="S.activeInput=\'dm\'" onblur="blurInput()" onkeydown="chatKey(event,\'dm\')"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
     + '<div id="mentionPop-dm" class="mentionpop"></div>'
     + '</div>';
 }
+/* 会话列表里的一行：头像 + 名字 + 最后一条消息预览 + 未读数 */
+function dmConvRow(key, title, lastMsg, unread){
+  var num = String(key) === 'storyteller' ? '书' : String(Number(key) + 1);
+  var color = (String(key) === 'storyteller') ? '#d9b66a' : seatColor(Number(key));
+  var prev = '';
+  if (lastMsg){
+    var mine = (String(lastMsg.from) === (iAmStoryteller(S.game) ? 'storyteller' : String(mySeatInGame(S.game))) );
+    prev = (mine ? '我：' : '') + String(lastMsg.text || '');
+    if (prev.length > 22) prev = prev.slice(0, 22) + '…';
+  } else prev = '还没有聊过';
+  return '<div class="dmconv' + (unread ? ' unread' : '') + '" onclick="openDm(\'' + key + '\')">'
+    + '<span class="dmav" style="background:' + color + '">' + num + '</span>'
+    + '<span class="dmmid"><span class="dmttl">' + esc(title) + '</span>'
+    + '<span class="dmsub">' + esc(prev) + '</span></span>'
+    + (unread ? '<span class="dmbadge">' + unread + '</span>' : '')
+    + '</div>';
+}
 function pickDmTo(v){
+  openDm(v);
+}
+/* 进入某人的会话（微信式：一个框整体替换成对话内容） */
+function openDm(v){
   v = String(v);
-  S.dmTo = (S.dmTo.length === 1 && S.dmTo[0] === v) ? [] : [v];
+  S.dmTo = [v];
+  S.dmView = 'chat';
   if (S.dmUnreadBy) delete S.dmUnreadBy[v];
+  S.dmUnread = 0;
+  render(true);
+  setTimeout(function(){ var el = document.getElementById('dmText'); if (el) el.focus(); }, 0);
+}
+/* 从对话返回会话列表 */
+function backDmList(){
+  S.dmView = 'list';
   render(true);
 }
 function toggleDmTo(el){
@@ -1752,10 +1852,7 @@ function toggleDmTo(el){
 }
 function toggleDm(){
   S.showDm = !S.showDm;
-  if (S.showDm) { S.dmUnread = 0; S.dmUnreadBy = {}; }
-  if (S.showDm && !(S.dmTo || []).length && S.game){
-    S.dmTo = ['storyteller'];
-  }
+  if (S.showDm) { S.dmUnread = 0; S.dmUnreadBy = {}; S.dmView = 'list'; }
   render(true);
 }
 /* 私聊浮层：绝对定位盖在圆桌之上，展开/收起都不影响其它框的布局 */
@@ -1820,7 +1917,8 @@ async function loadChat(skipRender){
       var _m = added[_ui];
       if (String(_m.from) === String(selfWho)) continue;
       if (_m.channel === 'private'){
-        S.dmUnread = (S.dmUnread||0)+1;
+        /* 私聊栏已经展开时新消息就是「已读」，不再点亮红点（否则红点永远消不掉） */
+        if (!S.showDm) S.dmUnread = (S.dmUnread||0)+1;
         /* 按人记未读：只有不是当前正在看的那个对象时才闪 */
         var peerKey = String(_m.from === 'storyteller' ? 'storyteller' : _m.from);
         var cur = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
@@ -1831,6 +1929,12 @@ async function loadChat(skipRender){
       }
       else { if (S.hideChat) S.chatUnread = (S.chatUnread||0)+1; }
     }
+  }
+  /* 面板正开着：进来的消息都算已读，把红点清掉（含当前正在看的那个人） */
+  if (!S.hideChat) S.chatUnread = 0;
+  if (S.showDm){
+    if (S.dmView === 'chat' && S.dmTo && S.dmTo.length && S.dmUnreadBy) delete S.dmUnreadBy[String(S.dmTo[0])];
+    if (!S.dmUnreadBy || !Object.keys(S.dmUnreadBy).length) S.dmUnread = 0;
   }
   if (skipRender) return;
   var ae = document.activeElement;
@@ -2052,9 +2156,13 @@ async function refresh(){
   } else if (S.game) {
     S.lastPhase = S.game.phase;
   }
-  /* 先取消息再渲染：头像上方的气泡要用最新的聊天记录 */
+  /* 先取消息（不自己重绘），再由页面指纹决定要不要重建整页：
+     ① 以前只要焦点在输入框里，render() 就整体让路，别人的新消息要等自己发一句才出现；
+     ② 以前每 3 秒无条件重建整页 innerHTML，人眼会看到抽搐。 */
   await loadChat(true);
-  render();
+  var sigNow = pageSig();
+  if (sigNow !== S.pageSig) { S.pageSig = sigNow; render(); }
+  else paintChatIfNeeded();
   if(S.tab==='wiki') loadWiki();
   /* 作弊页停留时持续拉取说书人日志：它正在思考时也要能一行行看到 */
   if(S.tab==='cheat' && S.game){
