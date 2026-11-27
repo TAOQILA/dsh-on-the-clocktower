@@ -545,8 +545,22 @@ function buildStorytellerDayPrompt(id) {
   lines.push(renderMessages(v.messages, v.seats));
   lines.push('');
   lines.push('严格只输出一个 JSON 对象：');
-  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"nextPhase":"","voteTarget":0,"resolveVote":false}');
+  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"nextPhase":"","voteTarget":0,"resolveVote":false,"enterNomination":false}');
   lines.push('voteTarget：要发起处决投票的目标座位号（从 1 开始）；不发起就填 0。resolveVote：为 true 表示现在结算当前这轮投票。');
+  /* 提名时机闸门：由说书人结合公共消息条数自行判断何时进入提名阶段 */
+  try {
+    const gate = E.nomGate(id);
+    const cfg = gate.cfg || { min: 20, softMax: 80, hardMax: 150, unanimous: true };
+    lines.push('');
+    lines.push('【提名时机 · 由你判断】今天公聊里已有 ' + gate.count + ' 条公开消息（存活 ' + gate.alive + ' 人）。');
+    lines.push('· 少于 ' + cfg.min + ' 条：除非有人明确要求，否则不要进入提名阶段。');
+    lines.push('· ' + cfg.min + ' ~ ' + cfg.softMax + ' 条：时机由你根据局势判断——讨论是否聊开、有没有比较明确的怀疑对象。');
+    lines.push('· 达到 ' + cfg.softMax + ' 条：通常就应该进入提名阶段了，不要无限拖延。');
+    lines.push('· 达到 ' + cfg.hardMax + ' 条：必须立刻进入提名阶段，没有例外。');
+    if (cfg.unanimous) lines.push('· 若所有存活玩家都公开表示同意进入提名，可以提前进入。');
+    lines.push('当前判定：' + ({ early: '还早', window: '窗口期（由你裁量）', overdue: '应当进入', hard: '必须进入', unanimous: '全员同意，可以进入' }[gate.stage] || gate.stage) + '。');
+    lines.push('若要现在进入提名阶段，在回包里写 "enterNomination":true；否则写 false。进入提名后由程序自动主持提名与投票流程，你不需要自己逐票统计。');
+  } catch (e) {}
   return { prompt: lines.join('\n'), view: v };
 }
 
@@ -653,7 +667,9 @@ function parseReply(raw) {
     deaths: Array.isArray(obj.deaths) ? obj.deaths.map(Number).filter(function (n) { return !isNaN(n); }) : [],
     nextPhase: obj.nextPhase ? String(obj.nextPhase) : '',
     /* 说书人聊天回包用的是 reply 字段，这里显式保留，否则回复会被当成「选择沉默」 */
-    reply: String(obj.reply == null ? '' : obj.reply)
+    reply: String(obj.reply == null ? '' : obj.reply),
+    /* 白天主持时：说书人自己判断现在是否该进入提名阶段 */
+    enterNomination: obj.enterNomination === true
   };
 }
 
@@ -1013,6 +1029,20 @@ async function runStoryteller(id, opts) {
         if (rp && rp.nextPhase) {
           const r = E.setPhase(id, rp.nextPhase);
           if (r && r.ok) applied.phase = rp.nextPhase;
+        }
+        /* 白天：说书人（或硬性闸门）要求进入提名阶段 → 交给提名驱动，不在主持循环里耗着 */
+        if (!isNight && rp) {
+          const gateNow = E.nomGate(id);
+          const wantNom = (rp.enterNomination === true) || (gateNow && gateNow.mustEnter === true);
+          if (wantNom && (gateNow.phase === 'day' || gateNow.phase === 'nomination')) {
+            if (gateNow.phase === 'day') { try { E.setPhase(id, 'nomination'); } catch (e) {} }
+            applied.phase = 'nomination';
+            E.log(id, '系统', '说书人决定进入提名阶段（今日公共消息 ' + gateNow.count + ' 条，判定 ' + gateNow.stage + '）', true);
+            setTimeout(function () {
+              try { runNomination(id, {}); } catch (e) { E.log(id, '系统', '自动进入提名失败：' + String((e && e.message) || e), true); }
+            }, 30);
+            break;
+          }
         }
         const didAct = (applied.info > pre.info) || (applied.markers > pre.markers) || (applied.deaths > pre.deaths) || (applied.phase && applied.phase !== pre.phase);
         stallN = didAct ? 0 : (stallN + 1);

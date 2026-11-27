@@ -383,6 +383,12 @@ body.hasbg .center-badge .winbanner{background:rgba(29,23,16,.86)}
 body.night .nomcur{background:rgba(255,255,255,.04)}
 body.night .nomclk{border-color:var(--edge2)}
 
+/* 提名时机闸门：白天面板上显示今日公共消息进度 */
+.nomgate{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:13px;line-height:1.6;
+  background:rgba(201,162,39,.10);border:1px solid rgba(201,162,39,.30);color:var(--ink,#e9e2d0)}
+.nomgate b{color:var(--gold);font-size:15px}
+body.night .nomgate{background:rgba(156,143,224,.12);border-color:rgba(156,143,224,.34)}
+
 /* 投票：秘密计票提示与票权角标 */
 .nomsecret{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:13px;line-height:1.5;
   background:rgba(120,90,200,.16);border:1px solid rgba(150,120,230,.38);color:#d8ccff}

@@ -44,7 +44,9 @@ function createGame(cfg){
     storyteller: cfg.storyteller, seats: cfg.seats,
     aiStyle: cfg.aiStyle || 'mild_fun',
     roleMode: cfg.roleMode || 'program',
-    roles: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
+    roles: {}, apparentRoles: {}, alignment: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
+    shields: {}, abilityUsed: {}, granted: {}, winBlocks: [], extra: {},
+    nomCfg: Object.assign({ min: 20, softMax: 80, hardMax: 150, unanimous: true }, cfg.nomCfg || {}),
     log: [], readAcks: []
   };
   cfg.seats.forEach((s,i)=>{
@@ -102,7 +104,16 @@ function setPhase(id, phase){
   else if (phase==='night') { s.dayStarted = null; }
   /* 换阶段时上一轮投票作废 */
   if (phase!=='day') s.vote = null;
+  /* 进入夜晚时，当天临时状态（不死、当天能力已用）作废；提名记录归档到 extra.dayLog */
+  if (phase==='night'){
+    s.shields = {};
+    Object.keys(s.abilityUsed||{}).forEach(function(k){
+      if (String(k).indexOf('day:') === 0) delete s.abilityUsed[k];
+    });
+  }
   const wasNight = (s.phase === 'night');
+  const wasDay = (s.phase === 'day' || s.phase === 'nomination' || s.phase === 'vote');
+  if (wasDay){ s.extra = s.extra || {}; s.extra.dayLog = s.extra.dayLog || []; s.extra.dayLog.push({ day:s.day, nominations:(s.nominations||[]).slice(), votes:s.votes||{} }); s.nominations = []; s.votes = {}; }
   s.phase=phase; s.turn++;
   saveState(id,s); log(id,'系统','进入阶段：'+phase+(phase==='night'?'（第'+s.night+'夜）':''));
   /* 首夜：爪牙得知恶魔、恶魔得知爪牙 + 3 个伪装身份（程序机械下发，说书人不会漏）*/
@@ -120,7 +131,9 @@ function setPhase(id, phase){
     else text += '昨夜是平安夜，没有人死亡。';
     say(id,'storyteller',text,'town');
   }
-  return {ok:true,state:s};
+  /* 阶段推进后按当前局势检查一次胜负（含角色自定义钩子） */
+  try { checkWin(id); } catch (e) {}
+  return {ok:true,state:loadState(id)};
 }
 function assignRole(id, seat, role){
   const s = loadState(id);
@@ -132,7 +145,13 @@ function assignRole(id, seat, role){
 function giveInfo(id, seat, text){
   const s = loadState(id);
   /* 同一座位不重复发同一条角色告知（程序发牌后说书人可能又想发一遍，会造成一人两个角色） */
-  const dup = (s.info[seat] || []).some(function(x){ return String(x.text || '').trim() === String(text || '').trim(); });
+  const tt = String(text || '').trim();
+  const dup = (s.info[seat] || []).some(function(x){
+    if (String(x.text || '').trim() !== tt) return false;
+    /* 角色告知永久幂等；其它信息只在同一夜/同一天/同阶段内去重（占卜师等每夜追问不会被吞） */
+    if (/你的角色是/.test(tt)) return true;
+    return Number(x.night||0) === Number(s.night||0) && Number(x.day||0) === Number(s.day||0) && x.phase === s.phase;
+  });
   if (dup) return { ok:true, skipped:true };
   /* night/day 记录发放时刻：夜里得到的信息，要到下一个白天才能公开讨论 */
   (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text, night:s.night, day:s.day, phase:s.phase});
@@ -173,10 +192,37 @@ function vote(id, seat, target){
   agentLog(id,seat,'actions',{kind:'vote',target});
   return {ok:true};
 }
-function execute(id, seat){
+/* 处决：带免死拦截、处决前置钩子、处决后钩子 */
+function execute(id, seat, opts){
+  opts = opts || {};
   const s = loadState(id);
-  s.alive[seat]=false; s.markers[seat].push('死亡');
-  saveState(id,s); log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+' 被处决');
+  if (!(seat >= 0 && seat < s.seats.length)) return {ok:false, error:'座位越界'};
+  if (!s.alive[seat]) return {ok:false, error:'该座位已经死亡'};
+  /* 免死/拦截：s.shields[seat] 记录本日不死原因（茶艺师、和平主义者、弄臣、魔鬼代言人等） */
+  const sh = s.shields && s.shields[seat];
+  if (sh && !opts.force) {
+    log(id, '系统', (seat+1)+' 号 '+s.seats[seat].name+' 免于处决（'+sh+'）', true);
+    say(id, 'storyteller', '没有发生处决——有人挡下了这一票。', 'town');
+    return {ok:true, blocked:true, reason:sh, win:{over:false}};
+  }
+  /* 处决前置钩子：圣徒处决→邪恶胜；替罪羊可能替死（由说书人通过 opts.substitute 指定） */
+  const role = roleOfSeat(s, seat);
+  let substitute = Number(opts.substitute);
+  if (!(substitute >= 0 && substitute < s.seats.length) || !s.alive[substitute]) substitute = -1;
+  const realSeat = substitute >= 0 ? substitute : seat;
+  s.alive[realSeat]=false; s.markers[realSeat].push('死亡');
+  if (role === '圣徒' && realSeat === seat) {
+    s.winBlocks = s.winBlocks || [];
+    s.win = { over:true, side:'evil', reason:'圣徒被处决', at:new Date().toISOString() };
+    s.phase = 'ended'; s.winner = 'evil';
+    saveState(id, s);
+    log(id,'系统','对局结束：邪恶阵营胜利（圣徒被处决）');
+    return {ok:true, win:s.win};
+  }
+  saveState(id,s); log(id,'系统',(realSeat+1)+' 号 '+s.seats[realSeat].name+' 被处决'+(substitute>=0?('（替 '+(seat+1)+' 号而死）'):''));
+  if (!Array.isArray(s.nominations)) s.nominations = [];
+  s.nominations.push({ kind:'execute', seat:realSeat, t:new Date().toISOString(), day:s.day });
+  saveState(id,s);
   const w = checkWin(id);
   return {ok:true, win:w};
 }
@@ -224,15 +270,27 @@ function resolveVote(id){
 }
 
 /* 夜间死亡（非处决）：与处决分开记账，避免日志写错 */
-function kill(id, seat, reason){
+/* 死亡（非处决）。opts.night=false 时不计入 nightDeaths（白天致死、猎手等） */
+function kill(id, seat, reason, opts){
+  opts = opts || {};
   const s = loadState(id);
   if (!(seat >= 0 && seat < s.seats.length)) return {ok:false, error:'座位越界'};
   if (!s.alive[seat]) return {ok:false, error:'该座位已经死亡'};
+  const sh = s.shields && s.shields[seat];
+  if (sh && !opts.force) {
+    log(id, '系统', (seat+1)+' 号 '+s.seats[seat].name+' 免于死亡（'+sh+'）', true);
+    return {ok:true, blocked:true, reason:sh, win:{over:false}};
+  }
   s.alive[seat]=false; s.markers[seat].push('死亡');
-  if (!Array.isArray(s.nightDeaths)) s.nightDeaths = [];
-  if (s.nightDeaths.indexOf(seat) < 0) s.nightDeaths.push(seat);
+  const isNight = opts.night !== false && (s.phase === 'night' || s.phase === 'dawn');
+  if (isNight) {
+    if (!Array.isArray(s.nightDeaths)) s.nightDeaths = [];
+    if (s.nightDeaths.indexOf(seat) < 0) s.nightDeaths.push(seat);
+  }
   saveState(id,s);
-  log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+' 在夜里死亡'+(reason?('（'+reason+'）'):''));
+  log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+(isNight?' 在夜里死亡':' 死亡')+(reason?('（'+reason+'）'):''));
+  /* 死亡时角色钩子：帽匠等 on_death 角色由说书人在提示词里处理，这里只记录 */
+  try { onDeathHooks(id, seat); } catch (e) {}
   const w = checkWin(id);
   return {ok:true, win:w};
 }
@@ -254,24 +312,65 @@ function checkWin(id){
   const s = loadState(id);
   if (s.win && s.win.over) return s.win;
   if (!s.roles || !Object.keys(s.roles).length) return { over:false };
-  /* 还没分配到恶魔，说明本局角色尚未真正落地，不能据此判定胜负 */
-  const anyDemon = Object.keys(s.roles).some(function(k){ return roleFaction(s.roles[k]) === 'demon'; });
-  if (!anyDemon) return { over:false };
+  s.extra = s.extra || {};
+  const seatRole = function(i){ return roleOfSeat(s, i); };
+  const hasRole = function(name, aliveOnly){
+    return (s.seats||[]).some(function(x,i){ return seatRole(i) === name && (!aliveOnly || s.alive[i]); });
+  };
   const aliveSeats = [];
   (s.seats||[]).forEach(function(x,i){ if (s.alive[i]) aliveSeats.push(i); });
-  let demonAlive = false;
-  aliveSeats.forEach(function(i){ if (roleFaction(s.roles[i]) === 'demon') demonAlive = true; });
-  let win = null;
-  if (!demonAlive){
-    win = { over:true, side:'good', reason:'恶魔已出局', at:new Date().toISOString() };
-  } else if (aliveSeats.length <= 2){
-    win = { over:true, side:'evil', reason:'场上仅剩 ' + aliveSeats.length + ' 人且恶魔仍在', at:new Date().toISOString() };
-  }
-  if (win){
-    s.phase = 'ended'; s.win = win; s.winner = win.side;
+  /* 恶魔判定改为「按真身角色，含红唇女郎接替后的角色」 */
+  let demonSeats = [];
+  (s.seats||[]).forEach(function(x,i){ if (roleFaction(seatRole(i)) === 'demon') demonSeats.push(i); });
+  if (!demonSeats.length) return { over:false };
+  const demonAlive = demonSeats.filter(function(i){ return s.alive[i]; });
+  /* 胜利结果可以被若干角色改写，最终统一通过 finish 落地 */
+  const finish = function(side, reason){
+    /* 异端分子：对调胜负（即使已死亡） */
+    if (hasRole('异端分子', false)) {
+      side = (side === 'good') ? 'evil' : 'good';
+      reason = reason + '（异端分子对调）';
+    }
+    /* 胜者已定过就不再覆盖 */
+    if (s.win && s.win.over) return s.win;
+    const win = { over:true, side:side, reason:reason, at:new Date().toISOString() };
+    s.phase = 'ended'; s.win = win; s.winner = side;
     saveState(id, s);
-    log(id, '系统', '对局结束：' + (win.side==='good'?'善良阵营胜利':'邪恶阵营胜利') + '（' + win.reason + '）');
+    log(id, '系统', '对局结束：' + (side==='good'?'善良阵营胜利':'邪恶阵营胜利') + '（' + reason + '）');
     return win;
+  };
+  /* 镇长：只有三名玩家存活且白天没有人被处决 → 善良胜 */
+  const execToday = (s.nominations||[]).some(function(x){ return x && x.kind === 'execute' && Number(x.day||0) === Number(s.day||0); });
+  if (hasRole('镇长', true) && aliveSeats.length === 3 && !execToday) {
+    return finish('good', '镇长在场且仅剩三人、今天没有人被处决');
+  }
+  /* 利维坦：多于一名善良玩家被处决 → 邪恶胜 */
+  if (hasRole('利维坦', true)) {
+    const goodExec = Number((s.extra && s.extra.goodExecuted) || 0);
+    if (goodExec >= 2) return finish('evil', '利维坦在场且已有 ' + goodExec + ' 名善良玩家被处决');
+  }
+  /* 恶魔全灭 */
+  if (!demonAlive.length) {
+    /* 红唇女郎接替：存活≥5 且红唇女郎存活时，她变成恶魔 */
+    const redv = (s.seats||[]).map(function(x,i){ return i; }).filter(function(i){ return s.alive[i] && seatRole(i) === '红唇女郎'; });
+    if (redv.length && aliveSeats.length >= 5) {
+      s.roles[redv[0]] = '小恶魔';
+      saveState(id, s);
+      log(id, '系统', '红唇女郎接替成为新的恶魔', true);
+      return { over:false, note:'红唇女郎接替恶魔' };
+    }
+    /* 主谋：恶魔死于处决 → 额外一个夜晚和一个白天 */
+    if (hasRole('主谋', true) && !s.extra.mastermindExtra) {
+      s.extra.mastermindExtra = true;
+      saveState(id, s);
+      log(id, '系统', '主谋在场：恶魔死于处决，游戏额外进行一个夜晚和一个白天', true);
+      return { over:false, note:'主谋延长' };
+    }
+    return finish('good', '恶魔已出局');
+  }
+  /* 存活人数不足 */
+  if (aliveSeats.length <= 2) {
+    return finish('evil', '场上仅剩 ' + aliveSeats.length + ' 人且恶魔仍在');
   }
   return { over:false };
 }
@@ -695,9 +794,25 @@ function voteWeight(s, seat){
   return 1;
 }
 function isEvilSeat(s, seat){
+  const ov = s.alignment && s.alignment[seat];
+  if (ov === 'evil') return true;
+  if (ov === 'good') return false;
   const f = roleFaction(roleOfSeat(s, seat));
   return f === "minion" || f === "demon";
 }
+/* 座位的真实阵营（good/evil），带覆盖层：莽夫、食人魔、灵言师等可改变阵营 */
+function alignOf(s, seat){
+  const ov = s.alignment && s.alignment[seat];
+  if (ov === 'evil' || ov === 'good') return ov;
+  return isEvilSeat(s, seat) ? 'evil' : 'good';
+}
+/* 座位的「自称/表面角色」：酒鬼、疯子、提线木偶等看到的是假身份 */
+function apparentOf(s, seat){
+  const a = s.apparentRoles && s.apparentRoles[seat];
+  return a || roleOfSeat(s, seat);
+}
+/* 说书人视角看到的角色（真身） */
+function trueRoleOf(s, seat){ return roleOfSeat(s, seat); }
 /* 街头风琴手在场且清醒时，本局所有投票都秘密统计 */
 function secretBallot(s){
   return (s.seats || []).some(function(x, i){
@@ -948,10 +1063,336 @@ function nomReset(id){
   saveState(id, s);
   return { ok:true };
 }
+/* ================= 角色底座（供说书人 ops 调用） ================= */
+/* 复活：撤销死亡标记，恢复存活；摆渡人/教授/集骨者等使用 */
+function revive(id, seat, opts){
+  opts = opts || {};
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  s.alive[seat] = true;
+  s.markers[seat] = (s.markers[seat] || []).filter(function(x){ return String(x) !== '死亡'; });
+  if (Array.isArray(s.nightDeaths)) s.nightDeaths = s.nightDeaths.filter(function(x){ return x !== seat; });
+  if (s.deadVoteUsed) delete s.deadVoteUsed[seat];
+  saveState(id, s);
+  log(id, '系统', (seat+1)+' 号 '+s.seats[seat].name+' 复活'+(opts.reason?('（'+opts.reason+'）'):''));
+  return { ok:true };
+}
+/* 强制改角色（理发师/麻脸巫婆/方古/小怪宝/巡山人/工程师/帽匠/学徒/哲学家/舞蛇人/食人魔…）
+   opts.keepApparent=true 时只改真身、不改表面身份；opts.silent=true 不私聊告知 */
+function forceRole(id, seat, role, opts){
+  opts = opts || {};
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!role) return { ok:false, error:'缺少角色名' };
+  s.roles[seat] = String(role);
+  if (!opts.keepApparent) {
+    if (s.apparentRoles) delete s.apparentRoles[seat];
+  }
+  saveState(id, s);
+  log(id, '说书人', (seat+1)+' 号 '+s.seats[seat].name+' 的角色变为：'+role, true);
+  if (!opts.silent && s.alive[seat]) {
+    giveInfo(id, seat, '你的角色变成了【'+role+'】。');
+  }
+  return { ok:true, role:String(role) };
+}
+/* 假身份（酒鬼/疯子/提线木偶/遗忘之门）：真身 roles，看到的是 apparentRoles */
+function setApparent(id, seat, role, opts){
+  opts = opts || {};
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.apparentRoles) s.apparentRoles = {};
+  s.apparentRoles[seat] = String(role);
+  saveState(id, s);
+  if (!opts.silent) giveInfo(id, seat, '你的角色是【'+role+'】。');
+  return { ok:true };
+}
+/* 阵营覆盖：莽夫/食人魔/灵言师等 */
+function setAlignment(id, seat, val){
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.alignment) s.alignment = {};
+  s.alignment[seat] = (val === 'evil') ? 'evil' : 'good';
+  saveState(id, s);
+  log(id, '说书人', (seat+1)+' 号 '+s.seats[seat].name+' 的阵营变为：'+(val==='evil'?'邪恶':'善良'), true);
+  if (s.alive[seat]) giveInfo(id, seat, '你的阵营变成了'+(val==='evil'?'邪恶':'善良')+'。');
+  return { ok:true };
+}
+/* 免死护盾：茶艺师/和平主义者/弄臣/魔鬼代言人/腹语师/替罪羊/维齐尔
+   until: 'day'（当天有效，入夜清空）| 'game'（永久）| 'next'（一次性，拦截后移除） */
+function setShield(id, seat, reason, until){
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.shields) s.shields = {};
+  s.shields[seat] = String(reason || '免死');
+  saveState(id, s);
+  log(id, '说书人', (seat+1)+' 号 '+s.seats[seat].name+' 获得免死：'+reason, true);
+  return { ok:true };
+}
+function clearShield(id, seat){
+  const s = loadState(id);
+  if (s.shields) delete s.shields[Number(seat)];
+  saveState(id, s);
+  return { ok:true };
+}
+/* 能力已用记录（每局一次 / 每天一次） */
+function markUsed(id, seat, key){
+  const s = loadState(id);
+  s.abilityUsed = s.abilityUsed || {};
+  s.abilityUsed[String(seat)+'|'+String(key)] = true;
+  saveState(id, s);
+  return { ok:true };
+}
+function isUsed(id, seat, key){
+  const s = loadState(id);
+  return !!(s.abilityUsed && s.abilityUsed[String(seat)+'|'+String(key)]);
+}
+/* 座位交换（女舍监/舞蛇人） */
+function swapSeats(id, a, b){
+  const s = loadState(id);
+  a = Number(a); b = Number(b);
+  if (!(a >= 0 && a < s.seats.length) || !(b >= 0 && b < s.seats.length)) return { ok:false, error:'座位越界' };
+  const t = s.seats[a]; s.seats[a] = s.seats[b]; s.seats[b] = t;
+  const mv = function(map){
+    if (!map) return;
+    const x = map[a]; map[a] = map[b]; map[b] = x;
+    if (x === undefined) delete map[a];
+  };
+  ['roles','apparentRoles','alignment','alive','markers','info','shields','abilityUsed'].forEach(function(k){ mv(s[k]); });
+  saveState(id, s);
+  log(id, '系统', (a+1)+' 号 与 '+(b+1)+' 号 交换了座位', true);
+  return { ok:true };
+}
+/* 带作用域的标记：scope='day'（当天有效，入夜清空）|'night'|'game'；默认 game */
+function setMarker(id, seat, marker, scope){
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.markers[seat]) s.markers[seat] = [];
+  if (marker && s.markers[seat].indexOf(marker) < 0) s.markers[seat].push(marker);
+  s.extra = s.extra || {};
+  s.extra.markerScope = s.extra.markerScope || {};
+  s.extra.markerScope[seat+'|'+marker] = scope === 'day' ? ('day:'+s.day) : (scope === 'night' ? ('night:'+s.night) : 'game');
+  saveState(id, s);
+  return { ok:true, markers:s.markers[seat] };
+}
+function clearMarker(id, seat, marker){
+  const s = loadState(id);
+  seat = Number(seat);
+  if (s.markers[seat]) s.markers[seat] = s.markers[seat].filter(function(x){ return String(x) !== String(marker); });
+  if (s.extra && s.extra.markerScope) delete s.extra.markerScope[seat+'|'+marker];
+  saveState(id, s);
+  return { ok:true };
+}
+/* 授予能力（瘟疫医生/科学怪人/哲学家/学徒/炼金术士）：写进 granted，说书人与前端据此提示 */
+function grantAbility(id, seat, role, opts){
+  opts = opts || {};
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  s.granted = s.granted || {};
+  s.granted[seat] = String(role || '');
+  saveState(id, s);
+  log(id, '说书人', (seat+1)+' 号 获得能力：'+role, true);
+  if (!opts.silent && s.alive[seat]) giveInfo(id, seat, '你获得了【'+role+'】的能力。');
+  return { ok:true };
+}
+/* 死亡钩子：读到 roles.json 的 on_death，交给后续提示词与机械效果 */
+function onDeathHooks(id, seat){
+  const s = loadState(id);
+  const role = roleOfSeat(s, seat);
+  s.extra = s.extra || {};
+  s.extra.deathLog = s.extra.deathLog || [];
+  s.extra.deathLog.push({ seat:seat, role:role, day:s.day, night:s.night, phase:s.phase });
+  saveState(id, s);
+  /* 罂粟种植者：爪牙与恶魔当场互认 */
+  if (role === '罂粟种植者') { try { dealEvilInfo(id); } catch (e) {} }
+  /* 瘟疫医生：说书人获得一个爪牙能力（记录，供提示词提醒） */
+  if (role === '瘟疫医生') { log(id, '系统', '瘟疫医生死亡：说书人获得一个爪牙能力', true); }
+  /* 帽匠：当晚爪牙与恶魔可换角色，由说书人在提示词中处理 */
+  if (role === '帽匠') { log(id, '系统', '帽匠死亡：今晚爪牙与恶魔可以更换角色', true); }
+  return { ok:true };
+}
+/* 流放（旅行者/异教领袖/歌伶式）：不消耗提名权、不算处决 */
+function exile(id, seat){
+  const s = loadState(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.alive[seat]) return { ok:false, error:'该座位已经死亡' };
+  s.alive[seat] = false;
+  s.markers[seat].push('流放');
+  saveState(id, s);
+  log(id, '系统', (seat+1)+' 号 '+s.seats[seat].name+' 被流放');
+  say(id, 'storyteller', (seat+1)+' 号 '+s.seats[seat].name+' 被流放。', 'town');
+  const w = checkWin(id);
+  return { ok:true, win:w };
+}
+/* 新增座位（旅行者进场） */
+function addSeat(id, name, type, role){
+  const s = loadState(id);
+  if (!name) return { ok:false, error:'缺少昵称' };
+  const seat = s.seats.length;
+  s.seats.push({ name:String(name), type:(type === 'agent' ? 'agent' : 'human') });
+  s.alive[seat] = true; s.markers[seat] = []; s.info[seat] = s.info[seat] || [];
+  if (type === 'agent') ensureDir(idOf(id, seat));
+  if (role) s.roles[seat] = String(role);
+  saveState(id, s);
+  log(id, '系统', '新增座位：'+(seat+1)+' 号 '+name+(role?('（'+role+'）'):''));
+  return { ok:true, seat:seat };
+}
+/* 重置某人今天的提名权（屠夫/报丧女妖/法官） */
+function resetNomination(id, seat, which){
+  const s = nomEnsure(id);
+  if (!s.nom) nomNewDay(s);
+  const k = (which === 'target') ? 'usedTarget' : 'usedNom';
+  if (seat == null) s.nom[k] = {}; else delete s.nom[k][Number(seat)];
+  saveState(id, s);
+  return { ok:true };
+}
+/* 重置所有死者的投票标记（摆渡人） */
+function resetDeadVotes(id){
+  const s = loadState(id);
+  s.deadVoteUsed = {};
+  saveState(id, s);
+  log(id, '系统', '所有死亡玩家重新获得投票标记', true);
+  return { ok:true };
+}
+/* 说书人回包里的通用操作分发：逐条执行并汇总 */
+function applyOps(id, ops){
+  const out = { roleChanges:0, revives:0, kills:0, executes:0, shields:0, aligns:0, apparent:0, grants:0, swaps:0, markers:0, wins:0, exiles:0, extra:0 };
+  if (!Array.isArray(ops)) return out;
+  for (let i = 0; i < ops.length; i++) {
+    const o = ops[i] || {};
+    try {
+      switch (String(o.op || '').toLowerCase()) {
+        case 'role': case 'rolechange': case 'setrole':
+          if (forceRole(id, o.seat, o.role, { keepApparent:!!o.keepApparent, silent:!!o.silent }).ok) out.roleChanges++; break;
+        case 'apparent': case 'fakerole':
+          if (setApparent(id, o.seat, o.role, { silent:!!o.silent }).ok) out.apparent++; break;
+        case 'align': case 'alignment':
+          if (setAlignment(id, o.seat, o.value || o.align).ok) out.aligns++; break;
+        case 'revive': case 'resurrect':
+          if (revive(id, o.seat, { reason:o.reason }).ok) out.revives++; break;
+        case 'kill':
+          if (kill(id, o.seat, o.reason || '能力致死', { night:o.night !== false }).ok) out.kills++; break;
+        case 'execute':
+          if (execute(id, o.seat, { substitute:o.substitute, force:!!o.force }).ok) out.executes++; break;
+        case 'shield':
+          if (setShield(id, o.seat, o.reason || '免死', o.until).ok) out.shields++; break;
+        case 'unshield':
+          if (clearShield(id, o.seat).ok) out.shields++; break;
+        case 'grant':
+          if (grantAbility(id, o.seat, o.role || o.ability, { silent:!!o.silent }).ok) out.grants++; break;
+        case 'swap': case 'swapseat':
+          if (swapSeats(id, o.a, o.b).ok) out.swaps++; break;
+        case 'marker': case 'setmarker':
+          if (setMarker(id, o.seat, o.marker, o.scope).ok) out.markers++; break;
+        case 'clearmarker':
+          if (clearMarker(id, o.seat, o.marker).ok) out.markers++; break;
+        case 'used':
+          markUsed(id, o.seat, o.key || 'ability'); out.extra++; break;
+        case 'resetnom':
+          resetNomination(id, o.seat, o.which); out.extra++; break;
+        case 'resetdeadvotes':
+          resetDeadVotes(id); out.extra++; break;
+        case 'exile':
+          if (exile(id, o.seat).ok) out.exiles++; break;
+        case 'addseat':
+          if (addSeat(id, o.name, o.type, o.role).ok) out.extra++; break;
+        case 'win': {
+          const side = (o.side === 'evil') ? 'evil' : 'good';
+          endGame(id, side, o.reason || '角色能力达成胜利条件');
+          out.wins++; break;
+        }
+        default:
+          log(id, '系统', '未识别的说书人操作：' + String(o.op || ''), true);
+      }
+    } catch (e) {
+      log(id, '系统', '执行说书人操作失败（' + String(o.op || '') + '）：' + String(e && e.message || e), true);
+    }
+  }
+  return out;
+}
+/* ---------- 提名时机：公共消息计数与进入提名的判定 ----------
+   用户设定（m09758）：说书人根据局势自己判断要不要进入提名阶段；
+   公共消息数 < min 不进入，min~softMax 之间由说书人裁量，softMax 之后应当进入，
+   hardMax 到达必须进入（硬性）；若所有存活玩家都表示同意，可以提前进入。
+   这三个数值与「全员同意可提前」都可在设置里改。 */
+const NOM_CFG_DEFAULT = { min: 20, softMax: 80, hardMax: 150, unanimous: true };
+const NOM_AGREE_RE = /(进入|开始|发起|进行|走|开).{0,6}提名|提名(阶段|吧|了|一下)|可以提名|同意提名|赶紧提名|该提名/;
+
+function nomCfgOf(s){
+  const c = Object.assign({}, NOM_CFG_DEFAULT, (s && s.nomCfg) || {});
+  c.min = Math.max(0, Number(c.min) || 0);
+  c.softMax = Math.max(c.min, Number(c.softMax) || 0);
+  c.hardMax = Math.max(c.softMax, Number(c.hardMax) || 0);
+  c.unanimous = c.unanimous !== false;
+  return c;
+}
+/* 当天（dayStarted 之后）的公共消息条数：公聊频道，说书人的天亮播报也算 */
+function dayPublicCount(id){
+  const s = loadState(id);
+  const since = s.dayStarted ? new Date(s.dayStarted).getTime() : 0;
+  return (s.messages || []).filter(function(m){
+    if (m.channel !== 'town') return false;
+    if (!since) return true;
+    const t = new Date(m.t).getTime();
+    return !isFinite(t) ? true : t >= since;
+  }).length;
+}
+/* 是否所有存活玩家今天都在公聊里表示过「可以进提名」 */
+function allAgreeNominate(id){
+  const s = loadState(id);
+  const since = s.dayStarted ? new Date(s.dayStarted).getTime() : 0;
+  const said = {};
+  (s.messages || []).forEach(function(m){
+    if (m.channel !== 'town') return;
+    if (m.from === 'storyteller' || m.from === 'admin') return;
+    if (since && new Date(m.t).getTime() < since) return;
+    if (NOM_AGREE_RE.test(String(m.text || ''))) said[String(m.from)] = true;
+  });
+  const alive = [];
+  (s.seats || []).forEach(function(x, i){ if (s.alive[i]) alive.push(i); });
+  return alive.length > 0 && alive.every(function(i){ return said[String(i)] === true; });
+}
+/* 给说书人与前端共用的一道闸：stage = early/window/overdue/hard/unanimous */
+function nomGate(id){
+  const s = loadState(id);
+  const cfg = nomCfgOf(s);
+  const count = dayPublicCount(id);
+  const allAgree = cfg.unanimous ? allAgreeNominate(id) : false;
+  const aliveN = (s.seats || []).filter(function(x, i){ return s.alive[i]; }).length;
+  let stage = 'early';
+  if (count >= cfg.hardMax) stage = 'hard';
+  else if (allAgree) stage = 'unanimous';
+  else if (count >= cfg.softMax) stage = 'overdue';
+  else if (count >= cfg.min) stage = 'window';
+  return {
+    ok: true, phase: s.phase, day: s.day || 0, count: count, alive: aliveN,
+    cfg: cfg, allAgree: allAgree, stage: stage,
+    mustEnter: (stage === 'hard' || stage === 'unanimous'),
+    mayConsider: (stage === 'window' || stage === 'overdue' || stage === 'hard' || stage === 'unanimous')
+  };
+}
+function setNomCfg(id, cfg){
+  const s = loadState(id);
+  s.nomCfg = nomCfgOf({ nomCfg: cfg });
+  saveState(id, s);
+  log(id, '系统', '提名时机参数：最少 ' + s.nomCfg.min + ' 条 / 建议 ' + s.nomCfg.softMax + ' 条 / 最多 ' + s.nomCfg.hardMax + ' 条公共消息' + (s.nomCfg.unanimous ? '（全员同意可提前）' : ''), true);
+  return { ok: true, nomCfg: s.nomCfg };
+}
+
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
   dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
   evilInfoFor, bluffRoles, dealEvilInfo,
   voteWeight, secretBallot, butlerMaster, abilityOfSeat, isEvilSeat,
-  nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked };
+  revive, forceRole, setApparent, setAlignment, setShield, clearShield, markUsed, isUsed, swapSeats, setMarker, clearMarker,
+  grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf,
+  nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked,
+  dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT };

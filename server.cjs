@@ -151,6 +151,8 @@ function buildApi(opts){
   resolveVote: (b) => E.resolveVote(b.id),
   /* 提名与投票 */
   nomination: (b) => A.runNomination(b.id, b),
+  nomGate: (b) => E.nomGate(b.id),
+  setNomCfg: (b) => E.setNomCfg(b.id, { min:b.min, softMax:b.softMax, hardMax:b.hardMax, unanimous:b.unanimous }),
   nomStatus: (b) => A.nomStatus(b.id),
   nomState: (b) => E.nomState(b.id),
   nomPropose: (b) => E.nomPropose(b.id, b.from, b.target, b.reason),

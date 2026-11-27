@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.0';
+var VERSION = '0.15.1';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,8 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0 };
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
+  nomCfgMin:20, nomCfgSoftMax:80, nomCfgHardMax:150, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -84,6 +85,7 @@ function savePrefs(){
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
       aiStyle: S.aiStyle || 'mild_fun',
       roleMode: S.roleMode || 'program',
+      nomCfgMin: S.nomCfgMin, nomCfgSoftMax: S.nomCfgSoftMax, nomCfgHardMax: S.nomCfgHardMax, nomCfgUnanimous: S.nomCfgUnanimous !== false,
       activeGame: S.game ? S.game.id : '',
       activeGameSt: S.game ? iAmStoryteller(S.game) : false,
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
@@ -111,6 +113,10 @@ function loadPrefs(){
     S.storyProvider = o.storyProvider || '';
     S.storyModel = o.storyModel || '';
     S.roleMode = (o.roleMode === 'storyteller') ? 'storyteller' : 'program';
+    if (isFinite(Number(o.nomCfgMin))) S.nomCfgMin = Number(o.nomCfgMin);
+    if (isFinite(Number(o.nomCfgSoftMax))) S.nomCfgSoftMax = Number(o.nomCfgSoftMax);
+    if (isFinite(Number(o.nomCfgHardMax))) S.nomCfgHardMax = Number(o.nomCfgHardMax);
+    if (typeof o.nomCfgUnanimous === 'boolean') S.nomCfgUnanimous = o.nomCfgUnanimous;
     S.hideDm = o.hideDm === true;
     if (Array.isArray(o.seats) && o.seats.length >= 5 && o.seats.length <= 30) {
       S.seats = o.seats.map(function(x,i){
@@ -813,6 +819,7 @@ async function startGame(){
     return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
   });
   var cfg = { script:S.script.name, seats:seatsNew, aiStyle:(S.aiStyle||'mild_fun'), roleMode:(S.roleMode||'program'),
+    nomCfg:{ min:Number(S.nomCfgMin)||20, softMax:Number(S.nomCfgSoftMax)||80, hardMax:Number(S.nomCfgHardMax)||150, unanimous:S.nomCfgUnanimous!==false },
     storyteller:(zone==='story')
       ? {type:'player',name:'我'}
       : {type:'agent',name:(S.storyName||'说书人'),provider:S.storyProvider||'',model:S.storyModel||''} };
@@ -931,8 +938,18 @@ function nomPanel(){
   var control = canControl();
   if (!nomActive()){
     if (S.game.phase === 'day' && control){
+      var g2 = S.nomGate || null;
+      var prog = '';
+      if (g2) {
+        var c = g2.cfg || {};
+        var stTxt = { early:'还早，说书人不会主动进入', window:'窗口期：说书人自行判断', overdue:'应当进入提名阶段', hard:'已达硬性上限：必须进入', unanimous:'全员同意：可以提前进入' }[g2.stage] || '';
+        prog = '<div class="nomgate">今日公共消息 <b>' + g2.count + '</b> 条 / 存活 ' + g2.alive + ' 人　'
+          + '（最早 ' + c.min + ' · 通常 ' + c.softMax + ' · 上限 ' + c.hardMax + '）'
+          + '<div class="muted">' + stTxt + '。达到上限或全员同意时，说书人会自动进入提名阶段。</div></div>';
+      }
       return '<div class="section"><h3>提名与投票</h3>' +
         '<p class="muted">白天讨论得差不多了，就可以进入提名阶段：每位存活玩家每天有一次提名权，被提名者拿到的票数过半、且为当天最高，才会上处决台。</p>' +
+        prog +
         '<div class="row"><button onclick="startNomination()">开始提名阶段</button></div></div>';
     }
     return '';
@@ -1266,6 +1283,7 @@ function settingsPanel(){
     '</div>'+
     '<div class="section"><h3>设置 · 角色决定</h3>'+roleModeSelect()+'</div>'+
     '<div class="section"><h3>设置 · AI 风格</h3>'+styleSel+'</div>'+
+    '<div class="section"><h3>设置 · 提名时机</h3>'+nomCfgPanel()+'</div>'+
     '<div class="section"><h3>设置 · 自动流程</h3>'+
       sw('autoChat','进入白天时自动讨论','阶段切到白天时，AI 们自动接一轮话。')+
       sw('autoStory','进入夜晚时自动主持','阶段切到夜晚时，Agent 说书人自动结算这一夜。')+
@@ -1298,6 +1316,41 @@ function modelStyleSelect(){
     +'<select onchange="setAiStyle(this.value)">'+opts+'</select>'
     +'<div class="muted">极左更严肃理性，极右更轻松娱乐；不影响推理内容，只影响语气。</div>'
     + tail + '</div>';
+}
+/* 提名时机：由说书人结合「今天公聊里有多少条公开消息」判断何时进入提名阶段。
+   少于 min 不主动进；min~softMax 由说书人裁量；到 softMax 通常应进；到 hardMax 必须进；
+   全员公开表示同意可提前。四个参数都可在设置里改，并随建局写入 state.nomCfg。 */
+function nomCfgPanel(){
+  var mn = Number(S.nomCfgMin) || 20, sm = Number(S.nomCfgSoftMax) || 80, hm = Number(S.nomCfgHardMax) || 150;
+  var un = S.nomCfgUnanimous !== false;
+  return '<div class="setrow"><div>最早可以进入提名（条公共消息）</div>'+
+      '<input type="number" min="0" max="500" value="'+mn+'" onchange="setNomCfgUI(\'nomCfgMin\',this.value)">'+
+      '<div class="muted">少于这个条数时，除非有人明确提出，说书人不会主动进入提名阶段。</div></div>'+
+    '<div class="setrow"><div>通常应该进入提名（条公共消息）</div>'+
+      '<input type="number" min="0" max="1000" value="'+sm+'" onchange="setNomCfgUI(\'nomCfgSoftMax\',this.value)">'+
+      '<div class="muted">软性要求：到这个条数，说书人一般就该收尾进入提名了。</div></div>'+
+    '<div class="setrow"><div>必须进入提名（条公共消息）</div>'+
+      '<input type="number" min="0" max="2000" value="'+hm+'" onchange="setNomCfgUI(\'nomCfgHardMax\',this.value)">'+
+      '<div class="muted">硬性上限：到点必须进入提名阶段，没有例外。</div></div>'+
+    '<div class="setrow"><label><input type="checkbox" '+(un?'checked':'')+' onchange="setNomCfgUI(\'nomCfgUnanimous\',this.checked)"> 全员同意可以提前进入</label>'+
+      '<div class="muted">所有存活玩家都在公聊里表示「可以开始提名」时，说书人可以提前收尾。</div></div>'+
+    (S.game && S.game.id ? '<div class="muted">本局已开始：改动会立刻写入本局。</div>' : '<div class="muted">只影响之后创建的对局。</div>');
+}
+async function setNomCfgUI(key, val){
+  if (key === 'nomCfgUnanimous') S.nomCfgUnanimous = !!val;
+  else {
+    var n = Math.max(0, Number(val) || 0);
+    S[key] = n;
+  }
+  /* 保持 min <= softMax <= hardMax 的单调关系 */
+  if (Number(S.nomCfgSoftMax) < Number(S.nomCfgMin)) S.nomCfgSoftMax = S.nomCfgMin;
+  if (Number(S.nomCfgHardMax) < Number(S.nomCfgSoftMax)) S.nomCfgHardMax = S.nomCfgSoftMax;
+  savePrefs();
+  if (S.game && S.game.id) {
+    try { await api('setNomCfg',{ id:S.game.id, min:S.nomCfgMin, softMax:S.nomCfgSoftMax, hardMax:S.nomCfgHardMax, unanimous:S.nomCfgUnanimous !== false }); }
+    catch(e){ S.startError = String((e && e.message) || e); }
+  }
+  render(true);
 }
 /* 角色决定：程序（机械随机配比发牌）或说书人（由 Agent 依剧本自行分配） */
 function roleModeSelect(){
@@ -1919,6 +1972,18 @@ async function refresh(){
     await loadNom();
   } else { S.nom = null; S.nomRun = null; }
   if (nomActive() && !S.nomPolling) pollNom();
+  /* 提名时机闸门：白天时读一次，硬性上限/全员同意时自动进入提名阶段（每个白天只自动触发一次） */
+  if (phNow === 'day' && canControl()) {
+    try { S.nomGate = await api('nomGate',{id:S.game.id}); } catch(e){ S.nomGate = null; }
+    if (S.nomGate && S.nomGate.mustEnter && !nomActive() && S.nomGate.count >= 0) {
+      var autoKey = S.game.id + '#' + (S.game.day||0);
+      if (S.autoNomStarted !== autoKey) {
+        S.autoNomStarted = autoKey;
+        S.lastAutoNom = Date.now();
+        startNomination();
+      }
+    }
+  } else { S.nomGate = null; }
   if (iAmPlayer(S.game)){
     try { S.view = await api('view',{id:S.game.id, seat:mySeatInGame(S.game)}); } catch(e){}
   } else { S.view = null; }
