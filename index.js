@@ -31,7 +31,7 @@ export const inject = []
 const MOUNT = '/dsh-on-the-clocktower'
 const PORT = Number(process.env.RAN_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
 const MAX_TOKENS = 900 /* 默认输出上限：回包只是一个短 JSON，给太长会拖慢 */
-const VERSION = '0.15.12'
+const VERSION = '0.15.13'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)

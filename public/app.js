@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.12';
+var VERSION = '0.15.13';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -898,9 +898,11 @@ function myIdentityPanel(){
   var v = S.view || {};
   var role = v.role || '未分配';
   var fac = v.faction ? ('（'+v.faction+'）') : '';
+  /* 阵营被能力改写时额外提示一句（不解释原因，避免泄露是谁改的） */
+  var alignTxt = v.alignment ? ('<div class="idline muted">你现在的阵营：'+(v.alignment==='evil'?'邪恶':'善良')+'</div>') : '';
   var ab = v.ability ? ('<div class="idline muted">'+v.ability+'</div>') : '';
   return '<div class="idcard me"><b>你是 '+(mySeatInGame(g)+1)+' 号 '+((g.seats[mySeatInGame(g)]||{}).name||'')+'</b>'+
-    '<div class="idline">角色：<b>'+role+'</b>'+fac+' '+(v.alive===false?'（已出局，仍可发言）':'')+'</div>'+ab+'</div>';
+    '<div class="idline">角色：<b>'+role+'</b>'+fac+' '+(v.alive===false?'（已出局，仍可发言）':'')+'</div>'+alignTxt+ab+'</div>';
 }
 /* 终局横幅 */
 function winBanner(g){

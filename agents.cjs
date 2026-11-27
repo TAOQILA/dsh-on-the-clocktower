@@ -192,9 +192,12 @@ function roleInfo(name) {
 function viewFor(id, seat) {
   const s = E.loadState(id);
   const me = s.seats[seat] || {};
-  let myRole = s.roles[seat] || null;
+  /* 假身份优先：酒鬼、疯子、提线木偶这类角色「以为自己是谁」，玩家看到的就是这张假牌，
+     绝不能把他真实的那张（酒鬼/提线木偶）发给他自己。 */
+  const apparent = (s.apparentRoles || {})[seat] || null;
+  let myRole = apparent || s.roles[seat] || null;
   if (!myRole) {
-    const said = (s.info[seat] || []).map(function (x) { return String(x.text || ''); }).join('\n');
+    const said = (s.info[seat] || []).map(function (x) { return String(x.text || ''); }).join('\\n');
     const m = said.match(/你的角色是[【\[]([^】\]]+)[】\]]/);
     if (m && m[1]) myRole = m[1].trim();
     if (!myRole) {
@@ -219,6 +222,9 @@ function viewFor(id, seat) {
     game: id, script: s.script, phase: s.phase, night: s.night, day: s.day,
     seat: seat, name: me.name || ('座位' + seat),
     role: myRole,
+    apparent: !!apparent,
+    /* 只有能力明确改写过阵营时才告诉玩家「你现在的阵营变了」；角色自带的阵营仍以他自己那张牌为准，
+    /* 阵营可能被能力改写（莽夫、食人魔、灵言师等）：只告诉玩家自己当前的阵营，不解释原因 */
     faction: info ? info.faction : null,
     ability: info ? info.ability : null,
     alive: !!s.alive[seat],
@@ -267,6 +273,39 @@ function voteRolesBrief(id){
   });
   return out.join('\n');
 }
+/* ---------- 带 [..] 标签的特殊角色：说书人照顾要点 ----------
+   带方括号的角色会改变开局配置或在场上制造额外状态。其中「配比 / 座位编排」这一层
+   已由 engine.dealRoles 机械完成（外来者增减、指定角色、邻座、特殊开局点名），
+   这里补的是留在说书人手里的那一层：谁醉酒、谁变角色、什么时候告知谁、规则该如何改写。 */
+const SPECIAL_ROLE_RULES = {
+  '男爵': '程序已按 [+2 外来者] 多配了 2 名外来者，你不需要再改配置；但别忘了外来者变多意味着善良方更弱，天平上多给善良一点空间。',
+  '军团': '这是一桌军团局：所有玩家都是军团，没有人是真正的镇民/外来者/爪牙。每个夜晚*（首夜不发动）可能有一名玩家死亡，由你决定死不死。若一项提名只有邪恶阵营投票则该提名无效（程序已自动判）。军团也会被当作爪牙。',
+  '卡扎力': '你要在首夜亲自决定「谁是什么爪牙」：用 ops 的 role 操作把爪牙改成你选的爪牙角色，并私聊告知本人新的角色能力。外来者数量可以是任意值：需要增减时用 ops 的 role 改角色，而不是依赖配比表。',
+  '召唤师': '首夜先私聊告知 ta 三个伪装身份；第三个夜晚让 ta 选择一名玩家，用 ops 的 role 把该玩家改成你指定的恶魔角色（并把阵营改成邪恶）。你不在场时不要生成真正的恶魔。',
+  '唱诗男孩': '程序已保证国王在场。当恶魔杀死国王时，用 info 私聊告知 ta「谁是恶魔」。其它夜晚不要给 ta 信息。',
+  '堤丰之首': '程序已把邪恶角色排成连续邻座、把你（恶魔）放在正中，并多配 1 名爪牙。外来者数量你可以任意定（默认按配比表）。',
+  '小怪宝': '程序已多配 1 名爪牙。每个夜晚，所有爪牙要秘密决定由谁照看小怪宝并「是恶魔」：私下问爪牙，收到答复后用 ops 的 marker 标记照看者。',
+  '巡山人': '程序已保证落难少女在场。每局限一次：ta 选中落难少女时，用 ops 的 role 把落难少女改成一名不在场的镇民角色，并私聊告知新角色与能力。',
+  '提线木偶': '程序已把木偶排在恶魔邻座。首夜要用 info 私聊告诉恶魔「谁是提线木偶」；木偶本人以为自己是你发给 ta 的那个善良角色，绝对不要向 ta 透露真相。',
+  '无神论者': '本局没有爪牙也没有恶魔（程序已改写配比）。你是唯一可以打破规则的人：可以给假信息、可以让能力「出错」，但必须服务于平衡。如果说书人（也就是你）被处决，善良阵营直接获胜——这一点要在那天如实结算。',
+  '村夫': '程序已按 [+0~2 村夫] 随机决定村夫数量。若场上有 2 名以上村夫，其中一人醉酒：用 ops 的 marker 给 ta 加「醉酒」，并让 ta 的能力悄悄失效（给的信息可以是错的）。',
+  '气球驾驶员': '程序已按 [+0~1 外来者] 随机决定外来者数量。ta 每夜得知一名「与上一夜得知的玩家角色类型不同」的玩家：给信息时注意不要和上一夜重复类型。',
+  '限': '外来者数量可以是任意值（不必按配比表）。在「等同于初始外来者数量的夜晚」（即第 N 夜，N=开局时的外来者人数）用 ops 的 marker 给所有镇民加「中毒」，直到下个黄昏再清掉。',
+  '隐士': '程序已按 [-0~1 外来者] 随机决定外来者数量。隐士拥有所有外来者能力：当有人查验 ta 时，可以按需要把 ta 当作任意一个外来者/邪恶角色来回答。'
+};
+function specialRolesBrief(id){
+  const s = E.loadState(id);
+  const seen = {};
+  const out = [];
+  (s.seats || []).forEach(function (x, i) {
+    const r = (s.roles || {})[i];
+    if (!r || seen[r]) return;
+    if (!SPECIAL_ROLE_RULES[r]) return;
+    seen[r] = true;
+    out.push('- ' + (i + 1) + ' 号 ' + x.name + '（' + r + '，' + (s.alive[i] ? '存活' : '已死亡') + '）：' + SPECIAL_ROLE_RULES[r]);
+  });
+  return out.join('\n');
+}
 function viewForStoryteller(id) {
   const s = E.loadState(id);
   return {
@@ -275,6 +314,8 @@ function viewForStoryteller(id) {
     seats: s.seats.map(function (x, i) {
       return {
         seat: i, name: x.name, alive: !!s.alive[i], role: s.roles[i] || null,
+        apparent: (s.apparentRoles || {})[i] || null,
+        alignment: (s.alignment && s.alignment[i]) || null,
         markers: s.markers[i] || [], info: (s.info[i] || [])
       };
     }),
@@ -506,6 +547,8 @@ function buildStorytellerNightPrompt(id) {
   }
   const vrb = voteRolesBrief(id);
   if (vrb) { lines.push(''); lines.push('【本局投票相关角色 · 需要你在主持时照顾】'); lines.push(vrb); }
+  const srp = specialRolesBrief(id);
+  if (srp) { lines.push(''); lines.push('【本局带 [ ] 标签的特殊角色 · 配比与座位已由程序排好，剩下这些要你亲自落实】'); lines.push('（凡是写着「程序已…」的，你不需要再做一遍；写着「你要…」的必须用 ops 或 info 真的做，只在 say 里说一句不算数）'); lines.push(srp); }
   lines.push('【关于提名处决】你不必急着投票。先听大家讨论：当有人提出了值得表决的指控、讨论已经充分、或者白天拖得太久（比如超过 10 分钟）没人推进，你就发起对某人的处决投票（见输出字段 voteTarget）。投票要按规则来：只有存活玩家有票，赞成必须多于反对且赞成票达到存活人数的一半才算通过。公告结果时如实说明票数与是否处决。');
   lines.push('');
   lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）；角色名后面括号里的就是它的身份类型，给信息时严格按这个类型来选');
@@ -549,11 +592,25 @@ function buildStorytellerNightPrompt(id) {
   lines.push('5. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等），并按天平系统决定这次的裁量往哪边偏。');
   lines.push('【不许空转】info 为空、markers 为空、deaths 为空、nextPhase 也为空 —— 这种「什么都没做」的回包是不允许的。你至少要做成一件：给出信息、提出问题、裁定死亡/状态、或推进到白天。');
   lines.push('');
+  lines.push('【角色能力需要用到的操作（ops）】当某个角色的能力不是「给信息」而是「真的改变场上状态」时，你必须用 ops 真的执行它，而不是只在 think 里想一想、或在 say 里宣布一句——只说不做等于没发生。可用操作（seat 一律写 1 起的座位号）：');
+  lines.push('· {"op":"role","seat":N,"role":"角色名"} 把某人的角色改成该角色（舞蛇人、麻脸巫婆、方古、理发师、小怪宝继承、红唇女郎接替等）');
+  lines.push('· {"op":"apparent","seat":N,"role":"角色名"} 只改他「看起来是什么」，不改真实角色（酒鬼、疯子、提线木偶、魔术师这类假身份）');
+  lines.push('· {"op":"align","seat":N,"value":"evil或good"} 改阵营（莽夫、食人魔、灵言师、异端分子等）');
+  lines.push('· {"op":"revive","seat":N} 复活（教授、集骨者、摆渡人）；{"op":"kill","seat":N,"reason":"原因","night":false} 白天致死请写 night:false');
+  lines.push('· {"op":"execute","seat":N} 立刻处决（贞洁者、猎手、枪手、精神病患者等能力导致的处决）；{"op":"exile","seat":N} 流放旅行者');
+  lines.push('· {"op":"shield","seat":N,"reason":"来源"} 免死一次（茶艺师、和平主义者、弄臣、魔鬼代言人、暴风捕手、维齐尔等）；{"op":"unshield","seat":N} 解除');
+  lines.push('· {"op":"swap","a":N,"b":M} 交换两个座位的角色（女舍监、理发师等）');
+  lines.push('· {"op":"marker","seat":N,"marker":"文本","scope":"day|night|game"} 打持续标记；{"op":"clearmarker","seat":N,"marker":"文本"} 清除');
+  lines.push('· {"op":"grant","seat":N,"role":"角色名"} 让某人获得某角色的能力（哲学家、学徒、炼金术士、科学怪人等）');
+  lines.push('· {"op":"used","seat":N,"key":"能力"} 记「本局已用过一次」；{"op":"resetnom","seat":N} 恢复提名权；{"op":"resetdeadvotes"} 恢复死亡票');
+  lines.push('· {"op":"win","side":"good或evil","reason":"原因"} 直接判定胜负（圣徒被处决、主谋、利维坦等特殊胜负条件）');
+  lines.push('不需要用到 ops 时写空数组 []。绝不要用 ops 去替玩家做「他能自己决定的事」。');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的裁判思路（不公开）","say":"你要对全场公开说的话，没有就空字符串",');
   lines.push(' "info":[{"seat":座位号（1 起）,"text":"私下告知该玩家的信息"}],');
   lines.push(' "markers":[{"seat":座位号（1 起）,"marker":"中毒/醉酒/被保护"}],');
   lines.push(' "deaths":[座位号（1 起）],');
+  lines.push(' "ops":[{"op":"操作名","seat":座位号（1 起）,其余参数}],');
   lines.push(' "nextPhase":""}');
   lines.push('重要：这一夜如果还有任何需要玩家自己选择目标、但你还没收到 ta 回复并结算的角色（例如占卜师选人、管家选主人、投毒者选人、恶魔选人），nextPhase 必须留空字符串 \"\"，不能写 \"day\"。等所有选择都结算完，下一轮主持再写 day。只说一句「天黑了」却没给任何人角色或信息，绝对不允许进入白天。');
   lines.push('【很重要】当这一夜该做的事都做完了（该发的信息发完、该问的选择都收到回复并结算、死亡已裁定），nextPhase 必须写 "day"，把游戏推进到白天。不要一直停在夜里。');
@@ -575,6 +632,10 @@ function buildStorytellerDayPrompt(id) {
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
   lines.push('');
+  const srpD = specialRolesBrief(id);
+  if (srpD) { lines.push(''); lines.push('【本局带 [ ] 标签的特殊角色 · 白天也要顾到的一层】'); lines.push(srpD); lines.push(''); }
+  const vrbD = voteRolesBrief(id);
+  if (vrbD) { lines.push(''); lines.push('【本局投票相关角色】'); lines.push(vrbD); lines.push(''); }
   lines.push('【全场座位与真相】（座位号从 1 开始）');
   v.seats.forEach(function (x) {
     const ri = x.role ? roleInfo(x.role) : null;
@@ -587,7 +648,9 @@ function buildStorytellerDayPrompt(id) {
   lines.push(renderMessages(v.messages, v.seats));
   lines.push('');
   lines.push('严格只输出一个 JSON 对象：');
-  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"nextPhase":"","voteTarget":0,"resolveVote":false,"enterNomination":false}');
+  lines.push('{"think":"你的裁判思路","say":"你要对全场说的话（可为空）","info":[],"markers":[],"deaths":[],"ops":[],"nextPhase":"","voteTarget":0,"resolveVote":false,"enterNomination":false}');
+  lines.push('若某个角色的能力要真的改变场上状态（改角色/改阵营/复活/处决/免死/交换座位/持续标记/判定胜负），必须写进 ops 真正执行，只在 say 里说一句不算数。op 的写法与夜晚相同，seat 一律 1 起；不需要就写 []。');
+  lines.push('白天由能力导致的死亡必须写 {"op":"kill","seat":N,"night":false} 或 {"op":"execute","seat":N}——不要写进 deaths 数组，deaths 只表示「昨夜死亡」。');
   lines.push('voteTarget：要发起处决投票的目标座位号（从 1 开始）；不发起就填 0。resolveVote：为 true 表示现在结算当前这轮投票。');
   /* 提名时机闸门：由说书人结合公共消息条数自行判断何时进入提名阶段 */
   try {
@@ -689,7 +752,7 @@ function extractObject(text) {
 /* 容错解析：去代码块、抓第一个平衡 JSON、失败则整段当发言 */
 function parseReply(raw) {
   let text = String(raw == null ? '' : raw).trim();
-  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '', reply: '', nominate: null };
+  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '', reply: '', nominate: null, ops: [] };
   if (!text) return empty;
   const fenceRe = new RegExp(FENCE + '(?:json)?\\s*([\\s\\S]*?)' + FENCE, 'i');
   const fence = text.match(fenceRe);
@@ -711,6 +774,8 @@ function parseReply(raw) {
       .map(function (x) { return { seat: Number(x.seat), marker: String(x.marker) }; }) : [],
     deaths: Array.isArray(obj.deaths) ? obj.deaths.map(Number).filter(function (n) { return !isNaN(n); }) : [],
     nextPhase: obj.nextPhase ? String(obj.nextPhase) : '',
+    /* 角色能力要真正改变场上状态时用 ops（这里保持 1 起座位号，落库前再转 0 起） */
+    ops: Array.isArray(obj.ops) ? obj.ops.filter(function (o) { return o && o.op; }) : [],
     /* 说书人聊天回包用的是 reply 字段，这里显式保留，否则回复会被当成「选择沉默」 */
     reply: String(obj.reply == null ? '' : obj.reply),
     /* 白天主持时：说书人自己判断现在是否该进入提名阶段 */
@@ -1101,7 +1166,7 @@ async function runStoryteller(id, opts) {
       const WAIT_ANSWER_MS = 45000;
       let out = null, stRound = 0, stLastN = msgN(), askedSeats = [], stallN = 0, sayFirst = '', askDriven = false;
       /* 逐轮累积的落库结果：每一轮都要立刻生效，不能等循环结束 */
-      const applied = { info: 0, markers: 0, deaths: 0, phase: null, vote: null, win: null };
+  const applied = { info: 0, markers: 0, deaths: 0, ops: 0, phase: null, vote: null, win: null };
       for (;;) {
         stRound++;
         const cur = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
@@ -1131,7 +1196,7 @@ async function runStoryteller(id, opts) {
         /* 每一轮的完整思考都立刻落库，绝不让说书人的思考被截断或吞掉 */
         let rp = null;
         try { rp = parseReply(out.text); if (rp && rp.think) E.think(id, 'storyteller', rp.think); } catch (e2) {}
-        const pre = { info: applied.info, markers: applied.markers, deaths: applied.deaths, phase: applied.phase };
+        const pre = { info: applied.info, markers: applied.markers, deaths: applied.deaths, ops: applied.ops, phase: applied.phase };
         if (stRound === 1 && rp && rp.say) sayFirst = String(rp.say);
         /* 每一轮的结果必须立刻落库：否则玩家在广场上根本看不到说书人的提问，也就永远不会回答 */
         if (rp && rp.say && !(stRound > 1 && sayFirst && String(rp.say) === sayFirst)) {
@@ -1156,6 +1221,24 @@ async function runStoryteller(id, opts) {
         }
         if (rp && Array.isArray(rp.markers)) rp.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
         if (rp && Array.isArray(rp.deaths)) rp.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
+        /* 角色能力真正改变场上状态（改角色/阵营/复活/处决/免死/交换/标记/判定胜负）：
+           说书人回包里的座位号是 1 起，engine 的底座函数一律 0 起，这里统一换算一次。 */
+        if (rp && Array.isArray(rp.ops) && rp.ops.length) {
+          const conv = [];
+          rp.ops.forEach(function (o0) {
+            const o = Object.assign({}, o0);
+            if (o.seat !== undefined && o.seat !== null && o.seat !== '') o.seat = toIdx(o.seat);
+            if (o.a !== undefined) o.a = toIdx(o.a);
+            if (o.b !== undefined) o.b = toIdx(o.b);
+            conv.push(o);
+          });
+          const opRes = E.applyOps(id, conv);
+          const opN = (opRes.roleChanges || 0) + (opRes.revives || 0) + (opRes.kills || 0) + (opRes.executes || 0)
+            + (opRes.shields || 0) + (opRes.aligns || 0) + (opRes.apparent || 0) + (opRes.grants || 0)
+            + (opRes.swaps || 0) + (opRes.markers || 0) + (opRes.wins || 0) + (opRes.exiles || 0) + (opRes.extra || 0);
+          applied.ops += opN;
+          if (opRes.wins) applied.win = 'ability';
+        }
         if (rp && rp.voteTarget) {
           const vt = toIdx(rp.voteTarget);
           if (vt >= 0) { const r = E.openVote(id, vt); if (r && r.ok) applied.vote = 'open:' + (vt + 1); }
@@ -1183,8 +1266,9 @@ async function runStoryteller(id, opts) {
             break;
           }
         }
-        const didAct = (applied.info > pre.info) || (applied.markers > pre.markers) || (applied.deaths > pre.deaths) || (applied.phase && applied.phase !== pre.phase);
+        const didAct = (applied.info > pre.info) || (applied.markers > pre.markers) || (applied.deaths > pre.deaths) || (applied.ops > (pre.ops || 0)) || (applied.phase && applied.phase !== pre.phase);
         stallN = didAct ? 0 : (stallN + 1);
+        if (applied.win) break;     /* 角色能力直接判定了胜负，主持到此为止 */
         if (applied.phase) break;   /* 阶段已经推进，本阶段主持结束 */
         if (stRound >= ST_SAFETY_CAP) break;
         /* 这一轮向玩家提了问：先驱动他们私下回答，再等回答落库，不能问完就收工 */
@@ -1790,6 +1874,6 @@ module.exports = {
   parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
   setLlmCall, hasLlm, routeFor,
   wikiLookup, clearKnowledge, playerSystem, storytellerSystem, gameKnowledge, CORE_RULES, BALANCE_RULES,
-  storyReply, buildStoryChatPrompt, AI_STYLES, stylePrompt, styleKey,
+  storyReply, buildStoryChatPrompt, specialRolesBrief, SPECIAL_ROLE_RULES, AI_STYLES, stylePrompt, styleKey,
   storyRecap, buildRecapPrompt
 };

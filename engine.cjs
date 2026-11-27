@@ -47,6 +47,8 @@ function createGame(cfg){
     roles: {}, apparentRoles: {}, alignment: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
     shields: {}, abilityUsed: {}, granted: {}, winBlocks: [], extra: {},
     nomCfg: Object.assign({ min: 15, softMax: 45, hardMax: 80, unanimous: true }, cfg.nomCfg || {}),
+    /* 特殊开局点名要进场的角色（无神论者 / 军团 / 召唤师 / 堤丰之首 …）：程序发牌时强制包含 */
+    special: Array.isArray(cfg.special) ? cfg.special.slice() : [],
     /* 每位玩家自己维护的「我要提名谁」清单：白天随时可改，进提名阶段直接按清单执行 */
     nomIntents: {},
     /* 本局发生过的 AI 调用错误：设置页底部「本局 AI 报错」直接读它 */
@@ -537,9 +539,27 @@ function shuffle(a){
    ② 指定角色：[+国王] [+落难少女]（该角色必须进场）
    ③ 座位约束：[邪恶角色全部邻座] [提线木偶会与恶魔邻座]
    ④ 在场条件：[无恶魔在场] [无邪恶角色在场] [多数玩家为军团]（正常开局不抽这些角色） */
+/* 解析角色能力里的方括号标签，得到「配比修正」与「布局约束」。
+   支持的写法（这些标签在不同角色上混用，必须全部认出来）：
+     [+2 外来者] [-1 外来者] [-0~1 外来者] [+0~1 外来者]   → 外来者数量增减（可为区间）
+     [+1 爪牙]                                             → 爪牙数量增加
+     [+0~2 村夫] [+国王] [+落难少女]                        → 指定/范围额外角色（区间按 min~max 随机取）
+     [外来者数量任意] [任意数量外来者]                       → 外来者数量由说书人定（程序发牌保持基础配比）
+     [邪恶角色全部邻座] [提线木偶会与恶魔邻座]                → 座位编排约束
+     [邪恶角色全部邻座，你靠近正中]                          → 上述 + 恶魔尽量坐正中
+     [无恶魔在场] [无邪恶角色在场] [多数玩家为军团]           → 特殊开局，普通局不抽
+   区间的语义：外来者区间直接作用在配比上；角色区间表示「该角色额外出现 min~max 个」。 */
 function bracketSpec(ability){
   const ab = String(ability || "");
-  const out = { plusOutsider:0, minusOutsider:0, anyOutsider:false, plusMinion:0, extraRoles:[], rangeRoles:[], evilAdjacent:false, puppetAdjacent:false, noDemon:false, noEvil:false, legion:false };
+  const out = {
+    plusOutsider:0, minusOutsider:0, plusMinion:0,
+    outMin:0, outMax:0,             /* 外来者净增减的区间（已合并上面两个字段） */
+    anyOutsider:false,
+    extraRoles:[], rangeRoles:[],
+    evilAdjacent:false, puppetAdjacent:false, demonCenter:false,
+    noDemon:false, noEvil:false, legion:false,
+    notes:[]
+  };
   const tags = [];
   const re = /\[([^\]]+)\]/g;
   let m;
@@ -550,17 +570,32 @@ function bracketSpec(ability){
     if (/多数玩家为军团/.test(t)) out.legion = true;
     if (/邪恶角色全部邻座/.test(t)) out.evilAdjacent = true;
     if (/提线木偶会与恶魔邻座/.test(t)) out.puppetAdjacent = true;
+    if (/靠近正中|坐在正中|靠近中央/.test(t)) out.demonCenter = true;
     if (/外来者数量任意|任意数量外来者/.test(t)) out.anyOutsider = true;
-    let mm = t.match(/\+\s*(\d+)\s*~\s*(\d+)\s*([^\s,，]+)/);
+    /* 区间角色：[+0~2 村夫] / [+1~2 国王] */
+    let mm = t.match(/[+＋]\s*(\d+)\s*[~～\-]\s*(\d+)\s*([^\s,，]+)/);
     if (mm) { out.rangeRoles.push({ name:mm[3], min:Number(mm[1]), max:Number(mm[2]) }); return; }
-    mm = t.match(/[+＋]\s*(\d+)\s*爪牙/);
-    if (mm) { out.plusMinion += Number(mm[1]); return; }
-    mm = t.match(/[+＋]\s*(\d+)\s*外来者/);
-    if (mm) { out.plusOutsider += Number(mm[1]); return; }
-    mm = t.match(/[-−]\s*(\d+)\s*外来者/);
-    if (mm) { out.minusOutsider += Number(mm[1]); return; }
+    /* 单个指定角色：[+国王]（排除已经命中数字的写法） */
     mm = t.match(/^[+＋]\s*([^\d\s,，]+)$/);
     if (mm) { out.extraRoles.push(mm[1]); return; }
+    /* 爪牙数量 */
+    mm = t.match(/[+＋]\s*(\d+)\s*爪牙/);
+    if (mm) { out.plusMinion += Number(mm[1]); return; }
+    /* 外来者区间：[+0~1 外来者] / [-0~1 外来者] / [+2 外来者] / [-1 外来者] */
+    mm = t.match(/([+＋\-−])\s*(\d+)\s*[~～]\s*(\d+)\s*外来者/);
+    if (mm) {
+      const lo = Number(mm[2]), hi = Number(mm[3]);
+      if (/[+＋]/.test(mm[1])) { out.outMin += lo; out.outMax += hi; }
+      else { out.outMin -= hi; out.outMax -= lo; }
+      return;
+    }
+    mm = t.match(/([+＋\-−])\s*(\d+)\s*外来者/);
+    if (mm) {
+      const v = Number(mm[2]);
+      if (/[+＋]/.test(mm[1])) { out.outMin += v; out.outMax += v; out.plusOutsider += v; }
+      else { out.outMin -= v; out.outMax -= v; out.minusOutsider += v; }
+      return;
+    }
   });
   return out;
 }
@@ -581,6 +616,7 @@ function dealRoles(id){
   if (!n) return { ok:false, error:'没有座位' };
   const comp = compositionFor(n);          /* [镇民, 外来者, 爪牙, 恶魔] */
   const notes = [];
+  const allNames = scriptRoleNames(sc);
   /* 正常开局不能抽的「特殊开局」角色：先踢出牌池，再记一条备注 */
   function usable(listName, name){
     const info = roleInfoByName(name);
@@ -589,40 +625,100 @@ function dealRoles(id){
     if (sp.legion) { notes.push(name + ' 需要多数玩家为军团，本次不抽'); return false; }
     return true;
   }
+  /* 特殊开局：建局时显式点名要进场的角色（例如「无神论者」需要无邪恶角色在场、
+     「军团」需要多数玩家为军团、「召唤师」需要无恶魔在场）。这些角色平时被 usable()
+     踢出牌池，被点名时必须强制进场，并把配比按它们的阵营要求改写。 */
+  const forcedSpecial = Array.isArray(s.special) ? s.special.filter(function (x) { return allNames.indexOf(x) >= 0; }) : [];
+  const forcePool = {};
+  ['镇民', '外来者', '爪牙', '恶魔'].forEach(function (k) {
+    forcePool[k] = (g[k] || []).filter(function (x) { return forcedSpecial.indexOf(x) >= 0; });
+  });
   const pool = {};
   ['镇民', '外来者', '爪牙', '恶魔'].forEach(function (k) {
     pool[k] = (g[k] || []).filter(function (x) { return usable(k, x); });
   });
+  /* 被点名的特殊角色直接从普通牌池里拿掉，稍后强制塞进名单 */
+  const forcedList = [];
+  Object.keys(forcePool).forEach(function (k) {
+    forcePool[k].forEach(function (x) {
+      forcedList.push(x);
+      const idx2 = pool[k].indexOf(x); if (idx2 >= 0) pool[k].splice(idx2, 1);
+    });
+  });
+  if (forcedList.length) notes.push('特殊开局点名进场：' + forcedList.join('、'));
+  /* 被点名的角色自带「在场条件」时，整个配比要按它的要求改写：
+     · 无神论者 [无邪恶角色在场] → 整桌没有爪牙、没有恶魔，人数全部落在善良阵营；
+     · 召唤师 [无恶魔在场] → 一个恶魔都没有，只有爪牙。 */
+  let forcedNoEvil = false, forcedNoDemon = false;
+  forcedList.forEach(function (x) {
+    const sp = bracketSpec((roleInfoByName(x) || {}).ability);
+    if (sp.noEvil) forcedNoEvil = true;
+    if (sp.noDemon) forcedNoDemon = true;
+  });
+  if (forcedNoEvil) notes.push('按「无邪恶角色在场」改写配比：本局没有爪牙与恶魔');
+  else if (forcedNoDemon) notes.push('按「无恶魔在场」改写配比：本局没有恶魔');
+  /* 军团局是整桌同角色的特殊局：所有玩家都是军团，没有常规配比可言。
+     这种情况不必硬套发牌表，直接把每个座位都设成军团，说书人再按规则主持。 */
+  if (forcedList.indexOf('军团') >= 0) {
+    const pickedL = new Array(n).fill('军团');
+    s.roles = {};
+    s.seats.forEach(function (x, i) { s.roles[i] = pickedL[i]; });
+    saveState(id, s);
+    log(id, '系统', '军团局：全部 ' + n + ' 名玩家均为军团', true);
+    s.seats.forEach(function (x, i) { giveInfo(id, i, '你的角色是【军团】。'); });
+    const rosterL = s.seats.map(function (x, i) { return (i+1) + ' 号 ' + x.name + '：军团'; });
+    return { ok:true, roles:pickedL, roster:rosterL, notes:notes };
+  }
   /* 先抽恶魔：恶魔括号里的 [+N 爪牙] 会影响下面抽几个爪牙 */
   const demons = shuffle(pool['恶魔']).slice(0, comp[3]);
+  /* 被点名的恶魔直接顶替随机恶魔 */
+  const forcedDemons = forcedList.filter(function (x) { return roleFaction(x) === 'demon'; });
+  if (forcedDemons.length) { demons.length = 0; forcedDemons.forEach(function (x) { demons.push(x); }); }
+  if (forcedNoDemon || forcedNoEvil) demons.length = 0;
   let bonusMinion = 0;
   const reqRoles = [];            /* 必须进场的指定角色（[+国王] 等） */
   const rangeExtra = [];          /* 范围写法带来的可选额外角色 */
-  const allNames = scriptRoleNames(sc);
-  let evilAdjacent = false, puppetAdjacent = false;
+  let evilAdjacent = false, puppetAdjacent = false, demonCenter = false;
+  let outMinT = 0, outMaxT = 0;      /* 外来者数量的区间修正（多个角色叠加） */
   demons.forEach(function (name) {
     const info = roleInfoByName(name);
     const sp = bracketSpec(info && info.ability);
     bonusMinion += sp.plusMinion;
+    outMinT += sp.outMin; outMaxT += sp.outMax;
     if (sp.evilAdjacent) evilAdjacent = true;
+    if (sp.demonCenter) demonCenter = true;
     sp.extraRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) reqRoles.push(x); else notes.push('无法识别的额外角色 [' + x + ']（剧本里没有），已忽略'); });
-    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push(x); });
+    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push({ name:x.name, min:x.min, max:x.max }); });
   });
   /* 再抽爪牙：数量 = 基础配比 + 恶魔/爪牙自身带来的额外爪牙 */
   const minions = shuffle(pool['爪牙']).slice(0, comp[2] + bonusMinion);
+  /* 被点名的爪牙直接顶替随机爪牙 */
+  const forcedMinions = forcedList.filter(function (x) { return roleFaction(x) === 'minion'; });
+  if (forcedMinions.length) { minions.length = 0; forcedMinions.forEach(function (x) { minions.push(x); }); }
+  if (forcedNoEvil) minions.length = 0;
+  /* 被点名的善良角色（镇民/外来者）一律通过 reqRoles 强制进场 */
+  forcedList.forEach(function (x) {
+    const f = roleFaction(x);
+    if (f === 'townsfolk' || f === 'outsider') reqRoles.push(x);
+  });
   /* 带 [..] 的角色对配比做机械修正（外来者增减 / 指定角色 / 范围写法） */
-  let bonusOutsider = 0, anyOutsider = false;
+  let anyOutsider = false;
   minions.concat(demons).forEach(function (name) {
     const info = roleInfoByName(name);
     const sp = bracketSpec(info && info.ability);
-    bonusOutsider += sp.plusOutsider - sp.minusOutsider;
+    outMinT += sp.outMin; outMaxT += sp.outMax;
     if (sp.anyOutsider) anyOutsider = true;
     if (sp.puppetAdjacent) puppetAdjacent = true;
     sp.extraRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) reqRoles.push(x); else notes.push('无法识别的额外角色 [' + x + ']（剧本里没有），已忽略'); });
-    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push(x); });
+    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push({ name:x.name, min:x.min, max:x.max }); });
   });
   let [nt, no, nm, nd] = comp;
-  no = Math.max(0, no + bonusOutsider);
+  /* 区间写法：在 [outMinT, outMaxT] 里随机取一个净增减量，这样 [+0~2 村夫]、[-0~1 外来者]
+     这类角色每次开局的表现会不一样，而不是永远取同一头。 */
+  const outDelta = (outMinT === outMaxT) ? outMinT : (outMinT + Math.floor(Math.random() * (outMaxT - outMinT + 1)));
+  if (outDelta) notes.push('外来者数量修正 ' + (outDelta > 0 ? '+' : '') + outDelta
+    + (outMinT !== outMaxT ? '（区间 ' + outMinT + '~' + outMaxT + ' 内随机）' : ''));
+  no = Math.max(0, no + outDelta);
   /* 指定角色必须先排进各自阵营，占用对应名额 */
   const reqTown = [], reqOut = [];
   reqRoles.forEach(function (x) {
@@ -635,16 +731,34 @@ function dealRoles(id){
   /* 范围写法：随机取 0~max 个 */
   const rangeTown = [];
   rangeExtra.forEach(function (x) {
-    const k = Math.floor(Math.random() * 3);   /* 0~2 */
-    for (let i = 0; i < k; i++) rangeTown.push(x);
-    if (k) notes.push('范围角色 ' + x + ' 本次取 ' + k + ' 个');
+    const min = Math.max(0, Number(x.min) || 0);
+    const max = Math.max(min, Number(x.max) || min);
+    const k = (min === max) ? min : (min + Math.floor(Math.random() * (max - min + 1)));
+    for (let i = 0; i < k; i++) rangeTown.push(x.name);
+    if (k) notes.push('范围角色 ' + x.name + ' 本次取 ' + k + ' 个（' + min + '~' + max + '）');
   });
   no = Math.max(0, no - reqOut.length);
+  /* 剧本里的阵营人数可能不够（例如剧本外来者太少）：宁可少一个外来者、多一个镇民，
+     也不能把同一个角色重复发给两个人。 */
+  const outsAvail = (pool['外来者'] || []).filter(function (x) { return reqOut.indexOf(x) < 0; }).length;
+  if (no > outsAvail) { no = outsAvail; }
   nt = Math.max(0, n - no - minions.length - demons.length - reqTown.length - rangeTown.length);
+  const townsAvail = (pool['镇民'] || []).filter(function (x) { return reqTown.indexOf(x) < 0 && rangeTown.indexOf(x) < 0; }).length;
+  if (nt > townsAvail) nt = townsAvail;
+  /* 仍然凑不齐（剧本角色总数不足）时，把缺口挪给人数最多的那一方；实在不够才降级补足 */
+  if (nt + no + minions.length + demons.length + reqTown.length + rangeTown.length < n) {
+    const gap = n - (nt + no + minions.length + demons.length + reqTown.length + rangeTown.length);
+    nt = Math.min(townsAvail, nt + gap);
+  }
   const towns = shuffle(pool['镇民'].filter(function (x) { return reqTown.indexOf(x) < 0 && rangeTown.indexOf(x) < 0; })).slice(0, nt);
   const outs = shuffle(pool['外来者'].filter(function (x) { return reqOut.indexOf(x) < 0; })).slice(0, no);
   let good = towns.concat(reqTown, rangeTown, outs, reqOut);
   const evil = shuffle(minions.concat(demons));
+  /* 注意：evil 打乱后第一个不一定是恶魔。邻座类编排必须按「谁是恶魔」「谁是提线木偶」定位，
+     否则会把爪牙当恶魔排、把同一个角色排两次。 */
+  const demonIdxInEvil = (function () { for (let i = 0; i < evil.length; i++) if (roleFaction(evil[i]) === 'demon') return i; return -1; })();
+  const puppetIdxInEvil = evil.indexOf('提线木偶');
+  function takeEvil(idx) { const v = evil[idx]; evil[idx] = null; return v; }
   /* 人数对不上时（剧本角色太少）用现有角色补足 / 截断 */
   while (good.length + evil.length < n && good.length > 0) good.push(good[Math.floor(Math.random() * good.length)]);
   good = shuffle(good);
@@ -652,23 +766,43 @@ function dealRoles(id){
   const picked = new Array(n).fill(null);
   const evilN = evil.length;
   if (evilAdjacent && evilN > 0 && evilN < n) {
-    /* 邪恶角色全部邻座：随机选一段连续的座位段放邪恶方 */
+    /* 邪恶角色全部邻座：随机选一段连续的座位段放邪恶方（恶魔放正中那一格） */
     const start = Math.floor(Math.random() * n);
-    for (let k = 0; k < evilN; k++) picked[(start + k) % n] = evil[k];
+    const slots = []; for (let k = 0; k < evilN; k++) slots.push((start + k) % n);
+    const demonSlot = slots[Math.floor(evilN / 2)];
+    if (demonIdxInEvil >= 0) picked[demonSlot] = takeEvil(demonIdxInEvil);
+    let si = 0;
+    for (let k = 0; k < evil.length; k++) {
+      if (evil[k] === null) continue;
+      while (si < slots.length && picked[slots[si]]) si++;
+      if (si >= slots.length) break;
+      picked[slots[si]] = evil[k];
+    }
     notes.push('邪恶角色全部邻座：已排在第 ' + (start + 1) + ' 号起的连续座位');
-  } else if (puppetAdjacent && evilN > 1) {
-    /* 提线木偶必须与恶魔邻座 */
+  } else if (puppetAdjacent && puppetIdxInEvil >= 0 && demonIdxInEvil >= 0) {
+    /* 提线木偶必须与恶魔邻座：先把恶魔放一个随机座位，木偶放下家空位，其余邪恶随便放 */
     const demonSeat = Math.floor(Math.random() * n);
-    picked[demonSeat] = evil[0];
+    picked[demonSeat] = takeEvil(demonIdxInEvil);
     let puppetSeat = (demonSeat + 1) % n;
-    let kOther = 1;
-    for (let i = 0; i < n && kOther < evilN; i++) { if (picked[i]) continue; if (i === puppetSeat) continue; picked[i] = evil[kOther++]; }
-    picked[puppetSeat] = evil[evilN - 1];
+    for (let t = 0; t < n && picked[puppetSeat]; t++) puppetSeat = (puppetSeat + 1) % n;
+    picked[puppetSeat] = takeEvil(puppetIdxInEvil);
+    for (let k = 0; k < evil.length; k++) {
+      if (evil[k] === null) continue;
+      let slot = Math.floor(Math.random() * n);
+      for (let t = 0; t < n && picked[slot]; t++) slot = (slot + 1) % n;
+      picked[slot] = evil[k];
+    }
     notes.push('提线木偶已排在恶魔邻座（' + (puppetSeat + 1) + ' 号）');
   } else {
     /* 普通局：邪恶方随机分散，保证恶魔与爪牙不扎堆也完全随机 */
     const idx = shuffle(Array.from({ length:n }, function (_, i) { return i; }));
-    for (let i = 0; i < evilN; i++) picked[idx[i]] = evil[i];
+    let ei = 0;
+    for (let i = 0; i < evilN; i++) {
+      let v = null;
+      while (ei < evil.length && v === null) { v = evil[ei]; evil[ei] = null; ei++; }
+      if (v === null) break;
+      picked[idx[i]] = v;
+    }
   }
   let gi = 0;
   for (let i = 0; i < n; i++) { if (!picked[i]) picked[i] = good[gi++] || (good[0] || '镇民'); }
@@ -676,8 +810,48 @@ function dealRoles(id){
   s.seats.forEach(function (x, i) { s.roles[i] = picked[i]; });
   saveState(id, s);
   log(id, '系统', '程序发牌：' + picked.join('、') + (notes.length ? '（' + notes.join('；') + '）' : ''), true);
-  /* 一次把「你的角色是【X】」发给每个人（giveInfo 自带去重，不会重复发） */
-  s.seats.forEach(function (x, i) { giveInfo(id, i, '你的角色是【' + picked[i] + '】。'); });
+  /* ---------- 假身份层：酒鬼 / 疯子 / 提线木偶 ----------
+     这三个角色「以为自己是谁」和「真实是什么」不一样。规则要求玩家拿到的是假身份，
+     而说书人（和引擎）保留真相。这里在发牌时机械生成假身份，并把假身份发给玩家本人。
+     其余需要假身份的角色（魔术师、间谍等）由说书人在夜间用 ops 的 apparent 操作处理。 */
+  s.apparentRoles = s.apparentRoles || {};
+  const inPlayNow = picked.slice();
+  function pickFake(factionList) {
+    const cand = [];
+    factionList.forEach(function (k) {
+      const list = (g[k] || []).filter(function (x) { return inPlayNow.indexOf(x) < 0; });
+      list.forEach(function (x) { cand.push(x); });
+    });
+    if (cand.length) return cand[Math.floor(Math.random() * cand.length)];
+    /* 剧本里没有可用的假身份（例如疯子所在剧本只带一个恶魔且已发出去）：
+       退回到全角色库里找同阵营、且本局没发出去的角色，避免玩家看穿自己。 */
+    try {
+      const zh = { townsfolk:'镇民', outsider:'外来者', minion:'爪牙', demon:'恶魔' };
+      const pool2 = roleInfoAll().filter(function (r) {
+        return r && factionList.indexOf(zh[r.faction]) >= 0 && inPlayNow.indexOf(r.name) < 0
+          && r.name !== '疯子' && r.name !== '酒鬼' && r.name !== '提线木偶';
+      });
+      if (pool2.length) return pool2[Math.floor(Math.random() * pool2.length)].name;
+    } catch (e2) {}
+    return null;
+  }
+  picked.forEach(function (role, i) {
+    let fake = null;
+    if (role === '酒鬼') fake = pickFake(['镇民']);
+    else if (role === '疯子') fake = pickFake(['恶魔']);
+    else if (role === '提线木偶') fake = pickFake(['镇民', '外来者']);
+    if (fake) {
+      s.apparentRoles[i] = fake;
+      log(id, '系统', '假身份：' + (i + 1) + ' 号真实是' + role + '，被告知是' + fake, true);
+    }
+  });
+  saveState(id, s);
+  /* 一次把「你的角色是【X】」发给每个人（giveInfo 自带去重，不会重复发）。
+     有假身份的座位发假身份，玩家永远看不到自己真实的那张牌。 */
+  s.seats.forEach(function (x, i) {
+    const shown = s.apparentRoles[i] || picked[i];
+    giveInfo(id, i, '你的角色是【' + shown + '】。');
+  });
   /* 首夜机械下发爪牙信息 / 恶魔信息（含 3 个伪装身份）*/
   dealEvilInfo(id);
   const roster = s.seats.map(function (x, i) { return (i+1) + ' 号 ' + x.name + '：' + picked[i]; });
@@ -766,6 +940,13 @@ function roleInfoByName(name){
     }
     return ROLE_LIST_CACHE.find(function(r){ return r && (r.name === name || r.id === name); }) || null;
   } catch(e){ return null; }
+}
+/* 全角色列表（惰性加载，用于剧本里找不到合适假身份时的兜底） */
+function roleInfoAll(){
+  try {
+    roleInfoByName('__none__');
+    return ROLE_LIST_CACHE || [];
+  } catch(e){ return []; }
 }
 let ROLE_LIST_CACHE = null;
 function createAndStart(cfg){
@@ -1727,4 +1908,4 @@ module.exports = { createGame, createAndStart, setSeatModel, loadState, saveStat
   revive, forceRole, setApparent, setAlignment, setShield, clearShield, markUsed, isUsed, swapSeats, setMarker, clearMarker,
   grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf, nomIntents, nomSetIntent, nomClearIntents, nomPickIntent, nomDropIntent,
   nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked,
-  adminExecute, adminSnapshot, dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat, nightWhisperTargets, aiError, aiErrors, nomAgreeSet, nomAgreeState };
+  adminExecute, adminSnapshot, dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat, nightWhisperTargets, aiError, aiErrors, nomAgreeSet, nomAgreeState, roleInfoAll, roleInfoByName };
