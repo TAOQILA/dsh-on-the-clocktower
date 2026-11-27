@@ -1,0 +1,22 @@
+{
+  "name": "血染钟鱼 · 魔典",
+  "short_name": "血染钟鱼",
+  "description": "在 DeepSeek Harness 里与 AI Agent 们一起游玩《染》的魔典界面",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14110e",
+  "theme_color": "#a31621",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
