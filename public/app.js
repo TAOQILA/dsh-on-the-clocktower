@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.18';
+var VERSION = '0.15.19';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1831,7 +1831,6 @@ function chatMsgsHtml(g, channel, peer){
       if (!invol) return false;
       var others = [String(m.from)].concat((m.to || []).map(String)).filter(function(x){ return x !== String(selfWho); });
       return others.indexOf(String(peer)) >= 0;
-      return others.indexOf(String(peer)) >= 0;
     }
     return true;
   });
@@ -1884,7 +1883,8 @@ function paintDm(){
   var dl = document.getElementById('dmLog');
   if (!dl) return;
   var nearBottom = (dl.scrollHeight - dl.scrollTop - dl.clientHeight) < 28;
-  dl.innerHTML = chatMsgsHtml(S.game, 'private');
+  var _peer = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
+  dl.innerHTML = chatMsgsHtml(S.game, 'private', _peer);
   if (nearBottom) dl.scrollTop = dl.scrollHeight;
 }
 function chatSelfLabel(g){
@@ -2074,7 +2074,7 @@ async function loadChat(skipRender){
   } catch(e){ return; }
   /* 未读计数：新消息只在对应面板收起时累加；展开即视为已读。自己发的不算。 */
   if (S.chatMsgs.length > oldMsgs.length){
-    var selfWho = !(S.game&&S.game.storyteller&&S.game.storyteller.type==='player') ? 'storyteller' : mySeatInGame(S.game);
+    var selfWho = iAmStoryteller(S.game) ? 'storyteller' : String(mySeatInGame(S.game));
     var added = S.chatMsgs.slice(oldMsgs.length);
     for (var _ui=0; _ui<added.length; _ui++){
       var _m = added[_ui];

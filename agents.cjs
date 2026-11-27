@@ -456,6 +456,8 @@ function buildPrompt(id, seat, replyTo, mode) {
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
     lines.push('说书人（或另一位玩家）刚刚私聊了你（见上方对话最后几条私聊），这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
+    lines.push('【正面回答，不许敷衍】对方问什么，你第一句就先回答什么：他问「你是不是信息位」就回答是或不是、你是什么位；他问「你怀疑谁」就点出具体座位。禁止用「收到」「我先听听」「等 X 摊完再说」「知道了」这类空话开头——那等于没回。');
+    lines.push('不方便说也要给出理由（「现在不说，报了就等于把身份交出去」），而不是答非所问。回答一句就够，不要长篇。');
     lines.push('【回答要明确】如果对方问的是「你要选谁 / 你要看谁 / 你要毒谁 / 谁是你要保护的人」这类问题，回答里必须点出明确的座位或名字（例："我选择 3 号 @长庚"）。不要只说「我想想」「再看看」「听天由命」这种没有指向的话，也不要反问对方。你的能力在夜里只能通过这句回答生效。');
   } else if (mode === 'react') {
     lines.push('现在轮到你思考：刚才场上有人公开发言（见上方对话最后几条）。');
@@ -1055,6 +1057,14 @@ async function runRound(id, opts) {
         await applyOne(id, seat, out, opts, run);
         run.done++;
         run.waiting = run.waiting.filter(function (n) { return n !== seat; });
+        /* 有人私聊进来：公聊先别接着说，立刻回私聊——不能让玩家等一整轮才被搭理 */
+        if (idx < pool.length - 1) {
+          const _dq = DM_QUEUE.get(id);
+          if (_dq && _dq.length) {
+            E.log(id, '系统', '有玩家私聊打断本轮的公开讨论，先回复私聊', true);
+            break;
+          }
+        }
       }
       E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位依次发言）');
     } catch (err) {
