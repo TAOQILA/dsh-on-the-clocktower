@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.14.0';
+var VERSION = '0.15.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -938,6 +938,7 @@ function nomPanel(){
     return '';
   }
   var n = nomObj() || {};
+  var meta = S.nom || {};
   var cur = nomCur();
   var stage = nomStage();
   var seats = S.game.seats || [];
@@ -956,6 +957,7 @@ function nomPanel(){
   h += '<p class="muted">' + tip + '</p>';
   if (S.nomRun && S.nomRun.running) h += '<div class="muted">说书人正在处理提名流程…</div>';
   if (S.nomRun && S.nomRun.error) h += '<div class="errbox">'+esc(S.nomRun.error)+'</div>';
+  if (meta.secret) h += '<div class="nomsecret">本局有街头风琴手在场：投票闭眼秘密统计，票数和是否上处决台都不会公开，直到宣布处决。</div>';
   if (cur && stage !== 'ask'){
     h += '<div class="nomcur">';
     h += '<div><b>' + names(cur.from) + '</b> 提名 <b>' + names(cur.target) + '</b></div>';
@@ -1001,8 +1003,11 @@ function nomPanel(){
       if (k <= ptr) cls += ' passed';
       if (k === ptr) cls += ' now';
       var hand = cur.hands ? cur.hands[s2] : undefined;
+      var wt = (meta.weights && meta.weights[s2] != null) ? meta.weights[s2] : 1;
+      var wtTag = (wt === 1) ? '' : ('<i class="nomwt">×' + wt + '</i>');
+      var bl = (meta.butler && meta.butler[s2] != null) ? ('<i class="nomwt nombt">管家→' + (meta.butler[s2]+1) + '</i>') : '';
       var mk = (hand === true) ? ' ✋' : ((hand === false) ? ' ✊' : '');
-      h += '<span class="'+cls+'">'+(s2+1)+mk+'</span>';
+      h += '<span class="'+cls+'">'+(s2+1)+mk+wtTag+bl+'</span>';
     });
     h += '</div>';
   }
@@ -1010,12 +1015,13 @@ function nomPanel(){
   if (results.length){
     h += '<div class="nomres">';
     results.slice(-4).forEach(function(r){
+      if (meta.secret || r.secret) { h += '<div>' + names(r.target) + ' 的票数已秘密统计。</div>'; return; }
       h += '<div>' + names(r.target) + ' 获得 ' + r.votes + ' 票（存活 ' + r.aliveCount + ' 人，需 ' + Math.ceil(r.aliveCount/2) + ' 票）· ' + (r.passed ? '上处决台' : '未上处决台') + '</div>';
     });
     h += '</div>';
   }
   if (n.onBlock){
-    h += '<div class="nomblock">当前在处决台上：' + names(n.onBlock.target) + '（' + n.onBlock.votes + ' 票）</div>';
+    h += meta.secret ? '<div class="nomblock">已有人在处决台上（秘密投票，不公开是谁）。</div>' : '<div class="nomblock">当前在处决台上：' + names(n.onBlock.target) + '（' + n.onBlock.votes + ' 票）</div>';
   }
   if (n.queue && n.queue.length){
     h += '<div class="muted">待处理提名：' + n.queue.map(function(q){ return names(q.from)+' → '+names(q.target); }).join('；') + '</div>';

@@ -382,3 +382,12 @@ body.hasbg .center-badge .winbanner{background:rgba(29,23,16,.86)}
 @keyframes handwave{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(10deg)}}
 body.night .nomcur{background:rgba(255,255,255,.04)}
 body.night .nomclk{border-color:var(--edge2)}
+
+/* 投票：秘密计票提示与票权角标 */
+.nomsecret{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:13px;line-height:1.5;
+  background:rgba(120,90,200,.16);border:1px solid rgba(150,120,230,.38);color:#d8ccff}
+body.night .nomsecret{background:rgba(90,70,170,.20);border-color:rgba(150,120,230,.45)}
+.nomclk .nomwt{display:inline-block;margin-left:2px;font-style:normal;font-size:10px;
+  padding:0 3px;border-radius:4px;background:rgba(201,162,39,.24);color:#f0dfa8;vertical-align:top}
+.nomclk .nombt{background:rgba(120,170,230,.24);color:#cfe4ff}
+body.night .nomclk .nomwt{background:rgba(201,162,39,.30);color:#f6e9c4}

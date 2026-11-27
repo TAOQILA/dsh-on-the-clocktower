@@ -218,6 +218,39 @@ function viewFor(id, seat) {
   };
 }
 
+/* ---------- 投票相关的角色能力速查（注入说书人提示词） ----------
+   这些能力里有相当一部分已由程序机械执行（票权、管家限制、秘密计票、军团无效），
+   说书人只需要处理好程序管不到的部分（例如每夜询问管家选谁当主人）。 */
+const VOTE_ROLE_RULES = {
+  '管家': '每夜必须选一名主人（除自己以外）。白天只有主人投票时你才能投票。你每夜都要私聊问 ta「今晚想选谁当主人」，收到答复后用 toggleMarker 给 ta 加「主人:N」。',
+  '官员': 'ta 的投票算三票（程序已自动按三票计）。',
+  '窃贼': 'ta 的投票算负数（程序已自动按 −1 计）。',
+  '狂热者': '存活≥5 时 ta 必须在所有提名中投票（程序会强制）。',
+  '街头风琴手': 'ta 在场且清醒时，所有投票闭眼秘密统计：不要公布票数、不要公布是否上处决台，只在最后宣布谁被处决。',
+  '摆渡人': '游戏最后一天，所有死者重新获得投票标记（需要时你用 toggleMarker 处理）。',
+  '报丧女妖': '若恶魔杀死了 ta，所有玩家都会得知；此后 ta 每天可发起两次提名，每次投票可投两票。',
+  '魔像': 'ta 每局只能发起一次提名；提名时若被提名者不是恶魔，被提名者死亡。',
+  '法官': '每局限一次：别人发起提名时，ta 可以要求直接处决或让投票无效。',
+  '巫毒师': '只有 ta 和死者可以投票，且忽略「票数需过半」的要求。',
+  '主教': '只有说书人可以发起提名，且每个白天说书人至少提名一名与 ta 对立阵营的玩家。',
+  '屠夫': '每个白天首次处决后，ta 可以再次发起提名。',
+  '讷神': '场上有一顶讷帽，戴帽者只能说单音节词、投票算两票。',
+  '首席律师': '被提名者要选一名玩家，在投票前只有该玩家可以发言。'
+};
+function voteRolesBrief(id){
+  const s = E.loadState(id);
+  const seen = {};
+  const out = [];
+  (s.seats || []).forEach(function (x, i) {
+    if (!s.alive[i]) return;
+    const r = (s.roles || {})[i];
+    if (!r || seen[r]) return;
+    if (!VOTE_ROLE_RULES[r]) return;
+    seen[r] = true;
+    out.push('- ' + (i + 1) + ' 号 ' + x.name + '（' + r + '）：' + VOTE_ROLE_RULES[r]);
+  });
+  return out.join('\n');
+}
 function viewForStoryteller(id) {
   const s = E.loadState(id);
   return {
@@ -433,12 +466,16 @@ function buildStorytellerNightPrompt(id) {
   } else {
     lines.push('【当前投票】没有进行中的投票');
   }
+  const vrb = voteRolesBrief(id);
+  if (vrb) { lines.push(''); lines.push('【本局投票相关角色 · 需要你在主持时照顾】'); lines.push(vrb); }
   lines.push('【关于提名处决】你不必急着投票。先听大家讨论：当有人提出了值得表决的指控、讨论已经充分、或者白天拖得太久（比如超过 10 分钟）没人推进，你就发起对某人的处决投票（见输出字段 voteTarget）。投票要按规则来：只有存活玩家有票，赞成必须多于反对且赞成票达到存活人数的一半才算通过。公告结果时如实说明票数与是否处决。');
   lines.push('');
   lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）');
   v.seats.forEach(function (x) {
+    const ri = x.role ? roleInfo(x.role) : null;
+    const ab = ri && ri.ability ? (' 能力=' + String(ri.ability).replace(/\s+/g, ' ').slice(0, 220)) : '';
     lines.push((x.seat+1) + ' 号：' + x.name
-      + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配')
+      + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ab
       + (x.markers.length ? (' 标记=' + x.markers.join(',')) : '')
       + (x.info.length ? (' 已告知：' + x.info.map(function (i) { return i.text; }).join(' | ')) : ''));
   });
@@ -455,8 +492,13 @@ function buildStorytellerNightPrompt(id) {
   }
   const orderNow = nightOrderFor(id);
   lines.push('【本夜行动顺序 · 必须严格按这个顺序，一个角色一个角色地处理】');
-  lines.push(orderNow.length ? orderNow.map(function (n, i) { return (i + 1) + '. ' + n; }).join('　') : '（本局没有需要夜间行动的角色）');
+  lines.push(orderNow.length ? orderNow.map(function (n, i) {
+    const ri = roleInfo(n);
+    const ab = ri && ri.ability ? ('（' + String(ri.ability).replace(/\s+/g, ' ').slice(0, 130) + '）') : '';
+    return (i + 1) + '. ' + n + ab;
+  }).join('\n') : '（本局没有需要夜间行动的角色）');
   lines.push('处理方式（严格按顺序，不许跳、不许乱序）：');
+  lines.push('每一项都要照上面括号里的能力原文执行：读清楚「谁选目标」「得到什么信息」「有什么附带效果（中毒/醉酒/死亡/标记）」，不要凭印象简化，也不要漏掉附带效果。能力里写「由你决定」「可能」的地方是你的裁量空间，其余部分不得改动。');
   lines.push('1. 找出**第一个还没有结算**的角色。判断依据：看上面「已告知」里有没有针对该座位的信息；已发过、且不需要玩家再选择的，就算结算过了，直接跳过看下一个。');
   lines.push('2. 不需要玩家自己选目标的角色，可以按顺序连着结算（一个角色一条 info，不要合并成一条），但必须依照上表的先后，不许乱序。');
   lines.push('3. 一旦遇到需要该玩家自己选目标的角色（例如占卜师、管家、投毒者、恶魔），**立刻停下**：只发一条「请告诉我你想选择谁」的私聊提问，nextPhase 留空，等 ta 回复后再结算这一个，然后继续往下。');
@@ -494,7 +536,9 @@ function buildStorytellerDayPrompt(id) {
   lines.push('');
   lines.push('【全场座位与真相】（座位号从 1 开始）');
   v.seats.forEach(function (x) {
-    lines.push((x.seat+1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配'));
+    const ri = x.role ? roleInfo(x.role) : null;
+    const ab = ri && ri.ability ? (' 能力=' + String(ri.ability).replace(/\s+/g, ' ').slice(0, 220)) : '';
+    lines.push((x.seat+1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ab);
   });
   lines.push('');
   lines.push('【公开对话记录】');

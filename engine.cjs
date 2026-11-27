@@ -390,56 +390,157 @@ function shuffle(a){
   for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = out[i]; out[i] = out[j]; out[j] = t; }
   return out;
 }
-/* 程序发牌：返回 { ok, roles, roster }；roster 是给说书人看的「几号是谁」清单 */
+/* ---------- 带 [] 的角色：能力括号里的配比/座位约束 ----------
+   支持四类写法（其余写法一律只记录不强制）：
+   ① 范围数量：[+0~2 村夫] [−0~1 外来者] [任意数量外来者]
+   ② 指定角色：[+国王] [+落难少女]（该角色必须进场）
+   ③ 座位约束：[邪恶角色全部邻座] [提线木偶会与恶魔邻座]
+   ④ 在场条件：[无恶魔在场] [无邪恶角色在场] [多数玩家为军团]（正常开局不抽这些角色） */
+function bracketSpec(ability){
+  const ab = String(ability || "");
+  const out = { plusOutsider:0, minusOutsider:0, anyOutsider:false, plusMinion:0, extraRoles:[], rangeRoles:[], evilAdjacent:false, puppetAdjacent:false, noDemon:false, noEvil:false, legion:false };
+  const tags = [];
+  const re = /\[([^\]]+)\]/g;
+  let m;
+  while ((m = re.exec(ab))) tags.push(m[1].trim());
+  tags.forEach(function (t) {
+    if (/无恶魔在场/.test(t)) out.noDemon = true;
+    if (/无邪恶角色在场/.test(t)) out.noEvil = true;
+    if (/多数玩家为军团/.test(t)) out.legion = true;
+    if (/邪恶角色全部邻座/.test(t)) out.evilAdjacent = true;
+    if (/提线木偶会与恶魔邻座/.test(t)) out.puppetAdjacent = true;
+    if (/外来者数量任意|任意数量外来者/.test(t)) out.anyOutsider = true;
+    let mm = t.match(/\+\s*(\d+)\s*~\s*(\d+)\s*([^\s,，]+)/);
+    if (mm) { out.rangeRoles.push({ name:mm[3], min:Number(mm[1]), max:Number(mm[2]) }); return; }
+    mm = t.match(/[+＋]\s*(\d+)\s*爪牙/);
+    if (mm) { out.plusMinion += Number(mm[1]); return; }
+    mm = t.match(/[+＋]\s*(\d+)\s*外来者/);
+    if (mm) { out.plusOutsider += Number(mm[1]); return; }
+    mm = t.match(/[-−]\s*(\d+)\s*外来者/);
+    if (mm) { out.minusOutsider += Number(mm[1]); return; }
+    mm = t.match(/^[+＋]\s*([^\d\s,，]+)$/);
+    if (mm) { out.extraRoles.push(mm[1]); return; }
+  });
+  return out;
+}
+/* 每个剧本里可作为「额外指定角色」的角色名集合 */
+function scriptRoleNames(sc){
+  const g = (sc && sc.groups) || {};
+  const all = [];
+  Object.keys(g).forEach(function (k) { (g[k] || []).forEach(function (x) { all.push(x); }); });
+  return all;
+}
+/* 程序发牌：返回 { ok, roles, roster, notes }；roster 是给说书人看的「几号是谁」清单 */
 function dealRoles(id){
   const s = loadState(id);
   const sc = scriptData(s.script);
   if (!sc) return { ok:false, error:'找不到剧本：' + s.script };
   const g = sc.groups || {};
-  const pool = { 镇民: (g['镇民']||[]).slice(), 外来者: (g['外来者']||[]).slice(), 爪牙: (g['爪牙']||[]).slice(), 恶魔: (g['恶魔']||[]).slice() };
   const n = (s.seats || []).length;
   if (!n) return { ok:false, error:'没有座位' };
   const comp = compositionFor(n);          /* [镇民, 外来者, 爪牙, 恶魔] */
-  /* 先抽恶魔：恶魔的 [..] 括号可能要求额外爪牙，会影响下面抽几个爪牙 */
+  const notes = [];
+  /* 正常开局不能抽的「特殊开局」角色：先踢出牌池，再记一条备注 */
+  function usable(listName, name){
+    const info = roleInfoByName(name);
+    const sp = bracketSpec(info && info.ability);
+    if (sp.noDemon || sp.noEvil) { notes.push(name + ' 需要特殊开局（' + (sp.noDemon ? '无恶魔在场' : '无邪恶角色在场') + '），本次不抽'); return false; }
+    if (sp.legion) { notes.push(name + ' 需要多数玩家为军团，本次不抽'); return false; }
+    return true;
+  }
+  const pool = {};
+  ['镇民', '外来者', '爪牙', '恶魔'].forEach(function (k) {
+    pool[k] = (g[k] || []).filter(function (x) { return usable(k, x); });
+  });
+  /* 先抽恶魔：恶魔括号里的 [+N 爪牙] 会影响下面抽几个爪牙 */
   const demons = shuffle(pool['恶魔']).slice(0, comp[3]);
   let bonusMinion = 0;
-  demons.forEach(function(name){
-    const r = roleInfoByName(name);
-    const ab = (r && r.ability) || '';
-    const m = ab.match(/\[\s*\+\s*(\d+)\s*爪牙/);
-    if (m) bonusMinion += Number(m[1]);
+  const reqRoles = [];            /* 必须进场的指定角色（[+国王] 等） */
+  const rangeExtra = [];          /* 范围写法带来的可选额外角色 */
+  const allNames = scriptRoleNames(sc);
+  let evilAdjacent = false, puppetAdjacent = false;
+  demons.forEach(function (name) {
+    const info = roleInfoByName(name);
+    const sp = bracketSpec(info && info.ability);
+    bonusMinion += sp.plusMinion;
+    if (sp.evilAdjacent) evilAdjacent = true;
+    sp.extraRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) reqRoles.push(x); else notes.push('无法识别的额外角色 [' + x + ']（剧本里没有），已忽略'); });
+    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push(x); });
   });
   /* 再抽爪牙：数量 = 基础配比 + 恶魔/爪牙自身带来的额外爪牙 */
   const minions = shuffle(pool['爪牙']).slice(0, comp[2] + bonusMinion);
-  /* 带 [..] 的角色对配比做机械修正（外来者增减） */
-  let bonusOutsider = 0;
-  minions.concat(demons).forEach(function(name){
-    const r = roleInfoByName(name);
-    const ab = (r && r.ability) || '';
-    let m = ab.match(/\[\s*\+\s*(\d+)\s*外来者/);
-    if (m) bonusOutsider += Number(m[1]);
-    m = ab.match(/\[\s*-\s*(\d+)\s*外来者/);
-    if (m) bonusOutsider -= Number(m[1]);
+  /* 带 [..] 的角色对配比做机械修正（外来者增减 / 指定角色 / 范围写法） */
+  let bonusOutsider = 0, anyOutsider = false;
+  minions.concat(demons).forEach(function (name) {
+    const info = roleInfoByName(name);
+    const sp = bracketSpec(info && info.ability);
+    bonusOutsider += sp.plusOutsider - sp.minusOutsider;
+    if (sp.anyOutsider) anyOutsider = true;
+    if (sp.puppetAdjacent) puppetAdjacent = true;
+    sp.extraRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) reqRoles.push(x); else notes.push('无法识别的额外角色 [' + x + ']（剧本里没有），已忽略'); });
+    sp.rangeRoles.forEach(function (x) { if (allNames.indexOf(x) >= 0) rangeExtra.push(x); });
   });
   let [nt, no, nm, nd] = comp;
   no = Math.max(0, no + bonusOutsider);
-  nt = Math.max(0, n - no - minions.length - demons.length);
-  const towns = shuffle(pool['镇民']).slice(0, nt);
-  const outs  = shuffle(pool['外来者']).slice(0, no);
-  const bag = shuffle(towns.concat(outs, minions, demons));
-  /* 人数与角色池对不上时（剧本角色太少），用现有角色循环补足 */
-  while (bag.length < n && bag.length > 0) { bag.push(bag[Math.floor(Math.random() * bag.length)]); }
-  const picked = bag.slice(0, n);
+  /* 指定角色必须先排进各自阵营，占用对应名额 */
+  const reqTown = [], reqOut = [];
+  reqRoles.forEach(function (x) {
+    if (reqTown.indexOf(x) >= 0 || reqOut.indexOf(x) >= 0) return;
+    if (minions.indexOf(x) >= 0 || demons.indexOf(x) >= 0) return;
+    const f = roleFaction(x);
+    if (f === 'outsider') reqOut.push(x); else reqTown.push(x);
+  });
+  if (reqTown.length + reqOut.length) notes.push('指定角色必须进场：' + reqTown.concat(reqOut).join('、'));
+  /* 范围写法：随机取 0~max 个 */
+  const rangeTown = [];
+  rangeExtra.forEach(function (x) {
+    const k = Math.floor(Math.random() * 3);   /* 0~2 */
+    for (let i = 0; i < k; i++) rangeTown.push(x);
+    if (k) notes.push('范围角色 ' + x + ' 本次取 ' + k + ' 个');
+  });
+  no = Math.max(0, no - reqOut.length);
+  nt = Math.max(0, n - no - minions.length - demons.length - reqTown.length - rangeTown.length);
+  const towns = shuffle(pool['镇民'].filter(function (x) { return reqTown.indexOf(x) < 0 && rangeTown.indexOf(x) < 0; })).slice(0, nt);
+  const outs = shuffle(pool['外来者'].filter(function (x) { return reqOut.indexOf(x) < 0; })).slice(0, no);
+  let good = towns.concat(reqTown, rangeTown, outs, reqOut);
+  const evil = shuffle(minions.concat(demons));
+  /* 人数对不上时（剧本角色太少）用现有角色补足 / 截断 */
+  while (good.length + evil.length < n && good.length > 0) good.push(good[Math.floor(Math.random() * good.length)]);
+  good = shuffle(good);
+  /* ---------- 座位编排：处理「邻座」类约束 ---------- */
+  const picked = new Array(n).fill(null);
+  const evilN = evil.length;
+  if (evilAdjacent && evilN > 0 && evilN < n) {
+    /* 邪恶角色全部邻座：随机选一段连续的座位段放邪恶方 */
+    const start = Math.floor(Math.random() * n);
+    for (let k = 0; k < evilN; k++) picked[(start + k) % n] = evil[k];
+    notes.push('邪恶角色全部邻座：已排在第 ' + (start + 1) + ' 号起的连续座位');
+  } else if (puppetAdjacent && evilN > 1) {
+    /* 提线木偶必须与恶魔邻座 */
+    const demonSeat = Math.floor(Math.random() * n);
+    picked[demonSeat] = evil[0];
+    let puppetSeat = (demonSeat + 1) % n;
+    let kOther = 1;
+    for (let i = 0; i < n && kOther < evilN; i++) { if (picked[i]) continue; if (i === puppetSeat) continue; picked[i] = evil[kOther++]; }
+    picked[puppetSeat] = evil[evilN - 1];
+    notes.push('提线木偶已排在恶魔邻座（' + (puppetSeat + 1) + ' 号）');
+  } else {
+    /* 普通局：邪恶方随机分散，保证恶魔与爪牙不扎堆也完全随机 */
+    const idx = shuffle(Array.from({ length:n }, function (_, i) { return i; }));
+    for (let i = 0; i < evilN; i++) picked[idx[i]] = evil[i];
+  }
+  let gi = 0;
+  for (let i = 0; i < n; i++) { if (!picked[i]) picked[i] = good[gi++] || (good[0] || '镇民'); }
   s.roles = {};
   s.seats.forEach(function (x, i) { s.roles[i] = picked[i]; });
   saveState(id, s);
-  log(id, '系统', '程序发牌：' + picked.join('、'), true);
+  log(id, '系统', '程序发牌：' + picked.join('、') + (notes.length ? '（' + notes.join('；') + '）' : ''), true);
   /* 一次把「你的角色是【X】」发给每个人（giveInfo 自带去重，不会重复发） */
   s.seats.forEach(function (x, i) { giveInfo(id, i, '你的角色是【' + picked[i] + '】。'); });
   /* 首夜机械下发爪牙信息 / 恶魔信息（含 3 个伪装身份）*/
   dealEvilInfo(id);
   const roster = s.seats.map(function (x, i) { return (i+1) + ' 号 ' + x.name + '：' + picked[i]; });
-  return { ok:true, roles: picked, roster: roster };
+  return { ok:true, roles: picked, roster: roster, notes: notes };
 }
 /* ---------- 首夜：爪牙信息 / 恶魔信息 ----------
    规则要求（所有剧本通用）：
@@ -560,6 +661,53 @@ function storyLog(id){
 /* ==================== 提名与投票（按规则实现） ==================== */
 /* 每个白天：每名存活玩家各有 1 次提名权、1 次被提名权；死者有 1 张死亡票（复活则恢复不限票，再死再给 1 张）。
    一次提名流程：提名理由 → 被提名发言 → 投票（举手）→ 时钟轮转（经过即锁定）→ 结算 → 上处决台。 */
+/* ---------- 投票相关的角色能力（机械层） ----------
+   • 管家：只能跟主人一起投票（主人没举手，管家的票不算）
+   • 官员：一票算三票；窃贼：一票算负数；讷帽：算两票；报丧女妖：每次可投两票
+   • 军团：一项提名如果只有邪恶玩家投票，投票无效
+   • 狂信者（狂热者）：存活≥5 时必须投票
+   • 街头风琴手：投票闭眼、票数秘密统计（不公布票数与是否上处决台） */
+function roleOfSeat(s, seat){ return (s.roles && s.roles[seat]) || null; }
+function abilityOfSeat(s, seat){
+  const r = roleOfSeat(s, seat);
+  if (!r) return "";
+  const info = roleInfoByName(r);
+  return (info && info.ability) || "";
+}
+/* 管家选定的主人：从标记里读「主人:N」或「主人=N」（N 从 1 开始） */
+function butlerMaster(s, seat){
+  const ms = (s.markers && s.markers[seat]) || [];
+  for (let i = 0; i < ms.length; i++) {
+    const m = String(ms[i]).match(/主人\s*[:：=]\s*(\d+)/);
+    if (m) { const v = Number(m[1]) - 1; if (v >= 0 && v < s.seats.length) return v; }
+  }
+  return -1;
+}
+/* 这位玩家的一票算几张 */
+function voteWeight(s, seat){
+  const ab = abilityOfSeat(s, seat);
+  if (/投票算作三票/.test(ab)) return 3;
+  if (/投票算作两票/.test(ab)) return 2;
+  if (/每次投票时可以投两票/.test(ab)) return 2;
+  if (/投票会被算作负数/.test(ab)) return -1;
+  const ms = (s.markers && s.markers[seat]) || [];
+  if (ms.some(function(x){ return /讷帽/.test(String(x)); })) return 2;
+  return 1;
+}
+function isEvilSeat(s, seat){
+  const f = roleFaction(roleOfSeat(s, seat));
+  return f === "minion" || f === "demon";
+}
+/* 街头风琴手在场且清醒时，本局所有投票都秘密统计 */
+function secretBallot(s){
+  return (s.seats || []).some(function(x, i){
+    if (!s.alive[i]) return false;
+    const r = roleOfSeat(s, i);
+    if (r !== "街头风琴手") return false;
+    const ms = (s.markers && s.markers[i]) || [];
+    return !ms.some(function(m){ return /中毒|醉酒/.test(String(m)); });
+  });
+}
 function nomNewDay(s){
   s.nom = { stage:'idle', queue:[], cur:null, usedNom:{}, usedTarget:{}, onBlock:null, results:[], day:s.day||0, busy:false, lastTick:0, asked:{} };
 }
@@ -570,7 +718,24 @@ function nomEnsure(id){
 }
 function nomState(id){
   const s = nomEnsure(id);
-  return { ok:true, nom:s.nom, alive:s.alive, deadVoteUsed:s.deadVoteUsed||{}, seats:s.seats.map(function(x,i){ return {name:x.name, alive:!!s.alive[i]}; }) };
+  const w = {};
+  (s.seats || []).forEach(function (x, i) {
+    if (!s.alive[i]) return;
+    try { w[i] = voteWeight(s, i); } catch (e) { w[i] = 1; }
+  });
+  let secret = false;
+  try { secret = secretBallot(s); } catch (e) { secret = false; }
+  const butler = {};
+  (s.seats || []).forEach(function (x, i) {
+    try {
+      if (roleOfSeat(s, i) === '管家') {
+        const m = butlerMaster(s, i);
+        if (m >= 0) butler[i] = m;
+      }
+    } catch (e) {}
+  });
+  return { ok:true, nom:s.nom, alive:s.alive, deadVoteUsed:s.deadVoteUsed||{}, secret:secret, weights:w, butler:butler,
+    seats:s.seats.map(function(x,i){ return {name:x.name, alive:!!s.alive[i]}; }) };
 }
 function nomCanNominate(s, seat){
   if (!s.alive[seat]) return false;
@@ -625,6 +790,16 @@ function nomHand(id, seat, yes){
   seat = Number(seat);
   if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
   if (!s.alive[seat] && s.deadVoteUsed && s.deadVoteUsed[seat]) return { ok:false, error:'死者的投票标记已经用掉了' };
+  /* 管家：主人没举手时不能投票 */
+  if (s.alive[seat] && roleOfSeat(s, seat) === '管家' && yes) {
+    const master = butlerMaster(s, seat);
+    if (master >= 0 && !s.nom.cur.hands[master]) return { ok:false, error:'管家只能在主人投票时投票（主人还没举手）' };
+  }
+  /* 狂信者：存活≥5 时必须在所有提名中投票 */
+  if (!yes && s.alive[seat] && /大于等于五名玩家存活/.test(abilityOfSeat(s, seat))) {
+    const aliveN = s.seats.filter(function(x, i){ return s.alive[i]; }).length;
+    if (aliveN >= 5) return { ok:false, error:'狂信者在存活≥5 时必须在所有提名中投票' };
+  }
   s.nom.cur.hands[seat] = !!yes;
   saveState(id, s);
   return { ok:true, hands:s.nom.cur.hands };
@@ -640,14 +815,23 @@ function nomFinalizeSeat(s, seat){
   const cur = s.nom.cur;
   const want = !!cur.hands[seat];
   const alive = !!s.alive[seat];
-  let counted = false;
-  if (want) {
-    if (alive) { counted = true; }
-    else if (!(s.deadVoteUsed && s.deadVoteUsed[seat])) { counted = true; if (!s.deadVoteUsed) s.deadVoteUsed = {}; s.deadVoteUsed[seat] = true; }
+  /* 管家：主人没举手时，管家的举手不生效 */
+  let blocked = "";
+  if (want && alive && roleOfSeat(s, seat) === '管家') {
+    const master = butlerMaster(s, seat);
+    if (master >= 0 && !cur.hands[master]) blocked = '管家（主人未投票）';
+  }
+  const countedWant = want && !blocked;
+  let counted = false, weight = 1;
+  if (countedWant) {
+    if (alive) { counted = true; weight = voteWeight(s, seat); }
+    else if (!(s.deadVoteUsed && s.deadVoteUsed[seat])) { counted = true; weight = voteWeight(s, seat); if (!s.deadVoteUsed) s.deadVoteUsed = {}; s.deadVoteUsed[seat] = true; }
   }
   if (counted) cur.yes.push(seat); else cur.no.push(seat);
+  if (!cur.weights) cur.weights = {};
+  cur.weights[seat] = counted ? weight : 0;
   if (!cur.locked) cur.locked = [];
-  cur.locked.push({ seat:seat, hand:want, counted:counted });
+  cur.locked.push({ seat:seat, hand:want, counted:counted, weight:counted ? weight : 0, blocked:blocked });
 }
 function nomTick(id){
   const s = nomEnsure(id);
@@ -669,7 +853,13 @@ function nomResolve(id){
   const cur = s.nom.cur;
   if (!cur) return { ok:false, error:'当前没有提名' };
   const aliveCount = s.seats.filter(function(x,i){ return s.alive[i]; }).length;
-  const votes = cur.yes.length;
+  let votes = 0;
+  cur.yes.forEach(function (seat) { votes += (cur.weights && cur.weights[seat] != null) ? cur.weights[seat] : 1; });
+  /* 军团：一项提名如果只有邪恶玩家投票，投票无效 */
+  const legionIn = (s.seats||[]).some(function(x,i){ return s.alive[i] && roleOfSeat(s,i) === '军团'; });
+  let invalid = "";
+  if (legionIn && cur.yes.length && cur.yes.every(function (seat) { return isEvilSeat(s, seat); })) invalid = '只有邪恶玩家投票，投票无效';
+  if (invalid) votes = 0;
   const majority = (votes * 2 >= aliveCount);
   const prev = s.nom.onBlock ? s.nom.onBlock.votes : 0;
   let passed = false;
@@ -679,16 +869,24 @@ function nomResolve(id){
   } else if (votes === prev && s.nom.onBlock) {
     s.nom.onBlock = null;
   }
-  cur.votes = votes; cur.passed = passed; cur.aliveCount = aliveCount;
+  const secret = secretBallot(s);
+  cur.votes = votes; cur.passed = passed; cur.aliveCount = aliveCount; cur.secret = secret; cur.invalid = invalid;
   s.nom.stage = 'result';
-  s.nom.results.push({ from:cur.from, target:cur.target, votes:votes, aliveCount:aliveCount, passed:passed });
+  s.nom.results.push({ from:cur.from, target:cur.target, votes:votes, aliveCount:aliveCount, passed:passed, secret:secret });
   saveState(id, s);
   const tname = (cur.target+1)+' 号 '+s.seats[cur.target].name;
-  let txt = '投票结束：' + tname + ' 获得 ' + votes + ' 票（存活 ' + aliveCount + ' 人，需 ' + Math.ceil(aliveCount/2) + ' 票）。';
-  txt += (s.nom.onBlock && s.nom.onBlock.target === cur.target) ? '当前在处决台上。' : '没有上处决台。';
-  say(id, 'storyteller', txt, 'town');
-  log(id, '说书人', txt, true);
-  return { ok:true, stage:'result', votes:votes, passed:passed, onBlock:s.nom.onBlock };
+  if (secret) {
+    /* 街头风琴手：闭眼秘密计票，不公布票数与是否上处决台 */
+    say(id, 'storyteller', '投票结束。票数已秘密统计。', 'town');
+    log(id, '说书人', '秘密计票：' + tname + ' 获得 ' + votes + ' 票（不公开）', true);
+  } else {
+    let txt = '投票结束：' + tname + ' 获得 ' + votes + ' 票（存活 ' + aliveCount + ' 人，需 ' + Math.ceil(aliveCount/2) + ' 票）。';
+    if (invalid) txt += invalid + '。';
+    txt += (s.nom.onBlock && s.nom.onBlock.target === cur.target) ? '当前在处决台上。' : '没有上处决台。';
+    say(id, 'storyteller', txt, 'town');
+    log(id, '说书人', txt, true);
+  }
+  return { ok:true, stage:'result', votes:votes, passed:passed, secret:secret, onBlock:s.nom.onBlock };
 }
 /* 结束当前这一项提名：清空 cur；队列里还有就接着处理下一项 */
 function nomClose(id){
@@ -709,7 +907,7 @@ function nomFinish(id){
     const r = execute(id, ob.target);
     return { ok:true, executed:true, target:ob.target, win:(r && r.win) || null };
   }
-  say(id, 'storyteller', '今天没有人被处决。', 'town');
+  say(id, 'storyteller', secretBallot(s) ? '今天没有人被处决。' : '今天没有人被处决。', 'town');
   return { ok:true, executed:false };
 }
 function nomClearAsked(id){
@@ -755,4 +953,5 @@ module.exports = { createGame, createAndStart, setSeatModel, loadState, saveStat
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
   dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
   evilInfoFor, bluffRoles, dealEvilInfo,
+  voteWeight, secretBallot, butlerMaster, abilityOfSeat, isEvilSeat,
   nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked };
