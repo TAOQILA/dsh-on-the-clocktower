@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.19';
+var VERSION = '0.15.21';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -315,6 +315,15 @@ function restoreScroll(k){
   var sc = document.scrollingElement || document.documentElement;
   if (sc) sc.scrollTop = k.win;
 }
+/* 昼夜主题：页面的夜晚滤镜 + 背景图切换。
+   单独成函数，是因为阶段翻转时如果整页重建被跳过（例如你正在输入），
+   背景就会卡在上一张图，必须手动点一下才变。refresh 每轮都会调它。 */
+function applyPhaseTheme(){
+  var cur = S.game ? S.game.phase : 'setup';
+  var isNightPhase = (cur === 'night' || cur === 'dawn');
+  document.body.classList.toggle('night', (S.nightTheme !== false) && isNightPhase);
+  document.body.classList.toggle('bgnight', isNightPhase);
+}
 function render(force){
   /* 正在输入时不要重建整页，否则输入框会被销毁、光标丢失 */
   var ae = document.activeElement;
@@ -324,11 +333,7 @@ function render(force){
   S.pendingRender = false;
   var keep = capScroll();
   var g = S.game, seats = g?g.seats:S.seats;
-  var cur = g?g.phase:'setup';
-  var isNightPhase = (cur === 'night' || cur === 'dawn');
-  document.body.classList.toggle('night', (S.nightTheme !== false) && isNightPhase);
-  /* 背景图始终跟着阶段走：切到夜晚时两张图淡入淡出 */
-  document.body.classList.toggle('bgnight', isNightPhase);
+  applyPhaseTheme();
   /* 字号：整个界面按比例缩放（Chromium/Edge 支持 zoom），设置里可调 */
   var appEl = document.getElementById('app');
   if (appEl) appEl.style.zoom = String(S.fontScale || 1);
@@ -1232,6 +1237,7 @@ function agentStorySection(){
         + '</div>';
     }
   }
+  var out = '';
   if (st.running) out = '<div class="muted">说书人正在主持：'+doing+'</div>';
   else if (res){
     /* 只展示公开结果：说出口的话、死亡人数、进入的阶段、投票；不显示私有信息与标记数量 */
@@ -1956,10 +1962,18 @@ function dmPanel(g){
   var nightBlocked = night && dmPeer !== 'storyteller';
   var dmPlaceholder = nightBlocked ? '夜晚禁止玩家间私聊，只可与说书人私聊。' : '发消息…';
   var dmDis = nightBlocked ? ' disabled' : '';
+  /* 对方是否正在想怎么回你：让等待有反馈，不至于以为被无视 */
+  var typing = '';
+  var _ru = S.round || null;
+  if (_ru && _ru.running && dmPeer !== '' && dmPeer !== 'storyteller'){
+    if (String(_ru.current) === String(dmPeer)) typing = '对方正在输入…';
+    else if ((_ru.waiting || []).map(String).indexOf(String(dmPeer)) >= 0) typing = '正在排队发言…'; 
+  }
   return '<div class="dmcol"><div class="dmhead dmchathead">'
     + '<button class="dmback" onclick="backDmList()" title="返回私聊列表">‹</button>'
     + '<b>' + esc(peerName(dmPeer)) + '</b></div>'
     + '<div id="dmLog" class="log chatlog dmLog" data-keep="dmLog">' + chatMsgsHtml(g, 'private', dmPeer) + '</div>'
+    + '<div class="dmtyping" id="dmTyping">' + esc(typing) + '</div>'
     + (ro ? '<p class="muted">旁观模式：只能阅读私聊。</p>'
       : '<div class="row chatinput"><input id="dmText" style="flex:1" placeholder="' + dmPlaceholder + '" value="' + esc(S.dmDraft || '') + '"' + dmDis + ' oninput="chatInput(this,\'dm\')" onfocus="S.activeInput=\'dm\'" onblur="blurInput()" onkeydown="chatKey(event,\'dm\')"><button onclick="sendDm()"' + dmDis + '>发送</button></div>')
     + '<div id="mentionPop-dm" class="mentionpop"></div>'
@@ -2327,6 +2341,8 @@ async function loadWiki(){
 async function refresh(){
   if(!S.game) return;
   S.game = await api('game',gameReq());
+  /* 阶段一变就把昼夜背景切过去：不等整页重绘，否则正在打字时背景不会变 */
+  applyPhaseTheme();
   if(!S.round || !S.round.running){
     try { S.round = await api('roundStatus',{id:S.game.id}); } catch(e){}
   }

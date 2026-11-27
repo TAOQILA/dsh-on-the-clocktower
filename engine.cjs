@@ -2457,6 +2457,7 @@ function nightExec(id){
   return { ok:true, kind:"st", step:step };
 }
 /* 玩家回答了一个等待中的选择 */
+const NIGHT_NEED = { 女裁缝: 2, 旅店老板: 2, 沙巴洛斯: 2, 侍女: 2, 占卜师: 2 };
 function nightAnswer(id, seat, text){
   const s=nightEnsure(id);
   const step=(s.nightRun.steps||[]).filter(function(x){ return x.status==="await" && Number(x.seat)===Number(seat); })[0];
@@ -2479,7 +2480,14 @@ function nightAnswer(id, seat, text){
     saveState(id,s);
     return { ok:true, text:"（不使用能力）" };
   }
-  if(!seats.length) return { ok:false, error:"没看出你要选哪个座位，请回复座位号" };
+  if(!seats.length) return { ok:false, retry:true, error:"没看出你要选哪个座位，请回复座位号" };
+  /* 这一步只要一个人，玩家却点了两三个：不能默默取第一个，要打回去让他重选 */
+  const _need = NIGHT_NEED[step.role] || 1;
+  if (seats.length > _need) return { ok:false, retry:true, error:"这一步只能选 " + _need + " 名玩家，你给了 " + seats.length + " 个：请只回复你要选的那一位（例如「3 号」）。" };
+  /* 一句话里 @ 了好几个人：玩家的意思多半是「这几位里其中一个」，不能替他挑，必须问清楚 */
+  const _atN = (String(text || "").match(/@/g) || []).length;
+  if (_need === 1 && _atN >= 2 && seats.length !== 1) return { ok:false, retry:true, error:"你 @ 了 " + _atN + " 个人，这一步只能选 1 名玩家：请只回复你要选的那一个（例如「3 号」）。" };
+  if (seats.length < _need) return { ok:false, retry:true, error:"这一步需要选 " + _need + " 名玩家，你只给了 " + seats.length + " 个，请补齐。" };
   const r=h.resolve(id, s, Number(seat), seats, String(text||""));
   if(r && r.error) return { ok:false, error:r.error };
   giveInfo(id, Number(seat), r.text);

@@ -128,10 +128,22 @@ function buildApi(opts){
     }
     /* 夜间程序化流程：如果这条消息是在回答某个角色的夜间选择，直接交给引擎机械结算，
        不再让说书人模型自由发挥（m11961）。 */
+    let savedMsg = null;
+    const saveOwn = function () {
+      if (!savedMsg) { try { savedMsg = E.say(b.id, b.seat, b.text, b.channel || 'private', b.to); } catch (e) {} }
+      return savedMsg;
+    };
     if (b.seat !== undefined && b.seat !== null && b.seat !== '' && b.seat !== 'storyteller') {
       try {
         const na = E.nightAnswer(b.id, Number(b.seat), b.text);
+        if (na && !na.ok && na.retry) {
+          /* 选择不合法（人数不对等）：这句话要留在他自己的私聊里，同时把错误回给他，等他说对为止 */
+          saveOwn();
+          E.say(b.id, 'storyteller', na.error, 'private', [Number(b.seat)]);
+          return { ok: true, night: true, retry: true, error: na.error };
+        }
         if (na && na.ok) {
+          saveOwn();
           E.say(b.id, 'storyteller', '收到，已经按你的选择结算。', 'private', [Number(b.seat)]);
           /* 答案一落库，夜间流程要立刻接着往下走：
              否则玩家答完这一步，流程还停在原地，看起来就像卡死了（m11812）。 */
@@ -140,7 +152,7 @@ function buildApi(opts){
         }
       } catch (e) {}
     }
-    const r = E.say(b.id, b.seat, b.text, b.channel, b.to);
+    const r = savedMsg || E.say(b.id, b.seat, b.text, b.channel, b.to);
     /* 公聊里声明「我准备好进入提名了」：写进准备名单并公开显示在圆桌上，
        再由说书人结合天平判断是否真的进入提名阶段（m11961）。 */
     if (r && r.ok && r.message && r.message.channel === 'town' && r.message.from !== 'storyteller' && r.message.from !== 'admin') {

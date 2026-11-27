@@ -458,6 +458,7 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
     lines.push('【正面回答，不许敷衍】对方问什么，你第一句就先回答什么：他问「你是不是信息位」就回答是或不是、你是什么位；他问「你怀疑谁」就点出具体座位。禁止用「收到」「我先听听」「等 X 摊完再说」「知道了」这类空话开头——那等于没回。');
     lines.push('不方便说也要给出理由（「现在不说，报了就等于把身份交出去」），而不是答非所问。回答一句就够，不要长篇。');
+    lines.push('【输出要短】think 只写一句话（不超过 40 字）；say 最多两句、不超过 60 字。别写小作文，对方在等你回话。');
     lines.push('【回答要明确】如果对方问的是「你要选谁 / 你要看谁 / 你要毒谁 / 谁是你要保护的人」这类问题，回答里必须点出明确的座位或名字（例："我选择 3 号 @长庚"）。不要只说「我想想」「再看看」「听天由命」这种没有指向的话，也不要反问对方。你的能力在夜里只能通过这句回答生效。');
   } else if (mode === 'react') {
     lines.push('现在轮到你思考：刚才场上有人公开发言（见上方对话最后几条）。');
@@ -1057,12 +1058,23 @@ async function runRound(id, opts) {
         await applyOne(id, seat, out, opts, run);
         run.done++;
         run.waiting = run.waiting.filter(function (n) { return n !== seat; });
-        /* 有人私聊进来：公聊先别接着说，立刻回私聊——不能让玩家等一整轮才被搭理 */
+        /* 有人私聊进来：公聊先暂停，插队把私聊回掉，再接着说——
+           玩家不该等一整轮（好几分钟）才被搭理。 */
         if (idx < pool.length - 1) {
           const _dq = DM_QUEUE.get(id);
           if (_dq && _dq.length) {
-            E.log(id, '系统', '有玩家私聊打断本轮的公开讨论，先回复私聊', true);
-            break;
+            const _job = _dq.shift();
+            if (_dq.length) DM_QUEUE.set(id, _dq); else DM_QUEUE.delete(id);
+            const _ds = Number((_job.seats || [])[0]);
+            if (isFinite(_ds) && order.indexOf(_ds) >= 0) {
+              E.log(id, '系统', '有玩家私聊：暂停公开讨论，立刻先回私聊', true);
+              run.current = _ds;
+              let _dout = null;
+              try { _dout = await thinkAndSpeak(id, _ds, { replyTo: _job.replyTo }); }
+              catch (e) { _dout = { error: String((e && e.message) || e) }; }
+              try { await applyOne(id, _ds, _dout, { replyTo: _job.replyTo }, run); } catch (e) {}
+              run.current = seat;
+            }
           }
         }
       }
