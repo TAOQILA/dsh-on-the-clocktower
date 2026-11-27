@@ -126,7 +126,32 @@ function buildApi(opts){
         } catch (e) {}
       }
     }
+    /* 夜间程序化流程：如果这条消息是在回答某个角色的夜间选择，直接交给引擎机械结算，
+       不再让说书人模型自由发挥（m11961）。 */
+    if (b.seat !== undefined && b.seat !== null && b.seat !== '' && b.seat !== 'storyteller') {
+      try {
+        const na = E.nightAnswer(b.id, Number(b.seat), b.text);
+        if (na && na.ok) {
+          E.say(b.id, 'storyteller', '收到，已经按你的选择结算。', 'private', [Number(b.seat)]);
+          /* 答案一落库，夜间流程要立刻接着往下走：
+             否则玩家答完这一步，流程还停在原地，看起来就像卡死了（m11812）。 */
+          try { const sN = E.loadState(b.id); if (sN.phase === 'night' && sN.nightRun && !sN.nightRun.finished) A.runStoryteller(b.id, {}); } catch (e) {}
+          return { ok:true, night:true, text:na.text };
+        }
+      } catch (e) {}
+    }
     const r = E.say(b.id, b.seat, b.text, b.channel, b.to);
+    /* 公聊里声明「我准备好进入提名了」：写进准备名单并公开显示在圆桌上，
+       再由说书人结合天平判断是否真的进入提名阶段（m11961）。 */
+    if (r && r.ok && r.message && r.message.channel === 'town' && r.message.from !== 'storyteller' && r.message.from !== 'admin') {
+      try {
+        const rd = E.nomReadyFromChat(b.id, Number(r.message.from), r.message.text);
+        if (rd && rd.handled) {
+          try { A.nomReadyDecide(b.id, Number(r.message.from)); } catch (e) {}
+          return r;
+        }
+      } catch (e) {}
+    }
     /* 公聊里直接说「我提名 X」：由引擎解析并真正发起提名，不再指望说书人自己记账。
        提名一旦进入引擎，之后就说书人主持流程，别让 LLM 再自由发挥一遍。 */
     if (r && r.ok && r.message && r.message.channel === 'town' && r.message.from !== 'storyteller') {
@@ -209,6 +234,8 @@ function buildApi(opts){
     nomAgreeAsk: async (b) => A.askNomibationAgreement(b.id, { reason: b.reason }),
     nomAgreeState: (b) => E.nomAgreeState(b.id),
   setNomCfg: (b) => E.setNomCfg(b.id, { min:b.min, softMax:b.softMax, hardMax:b.hardMax, unanimous:b.unanimous }),
+  nomReady: (b) => (b.seat === undefined || b.seat === null || b.seat === "" ? E.nomReadyState(b.id) : E.nomSetReady(b.id, b.seat, b.yes !== false)),
+  nightState: (b) => E.nightProgress(b.id, !!b.full),
   nomStatus: (b) => A.nomStatus(b.id),
   nomState: (b) => E.nomState(b.id),
   nomPropose: (b) => E.nomPropose(b.id, b.from, b.target, b.reason),

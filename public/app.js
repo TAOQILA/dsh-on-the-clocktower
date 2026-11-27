@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.14';
+var VERSION = '0.15.15';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -24,7 +24,7 @@ var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
   showThinking:true, storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, dmView:'list', nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
-  nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'', aiErrs:null };
+  nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'', aiErrs:null, nomReady:null, nightState:null };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -524,9 +524,11 @@ function drawTable(seats,g){
        所以「思考中…」只给当前这位，排队的显示「待发言…」，别让所有人一起闪。 */
     var isThinking = S.showThinking !== false && S.round && S.round.running && Number(S.round.current) === i;
     var isWaiting = S.showThinking !== false && !isThinking && S.round && S.round.running && (S.round.waiting || []).indexOf(i) >= 0;
+    /* 「我准备好进入提名」标记：白天表态过的人头像右下角显一个小旗，圆桌上就能看出还差谁 */
+    var readyNom = !!(S.nomReady && S.nomReady.ready && S.nomReady.ready.indexOf(i) >= 0);
     el.innerHTML = '<div class="bubbles">'+bub+'</div>' +
       '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?('<span class="'+crossCls+'" title="'+(deadVoteLeft?'还有一张死亡票':'死亡票已经用掉')+'">✝</span>'):'')+'</div>'+
-      '<div class="nameline"><div class="name">'+s.name+'</div>'+(isThinking?'<div class="thinking">思考中…</div>':(isWaiting?'<div class="thinking wait">待发言…</div>':''))+'<div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
+      '<div class="nameline"><div class="name">'+s.name+(readyNom?'<span class="readyflag" title="已表示准备好进入提名">⚑</span>':'')+'</div>'+(isThinking?'<div class="thinking">思考中…</div>':(isWaiting?'<div class="thinking wait">待发言…</div>':''))+'<div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
     table.appendChild(el);
@@ -934,6 +936,17 @@ async function loadNom(){
   try { S.nom = await api('nomState',{id:S.game.id}); } catch(e){}
   try { S.nomRun = await api('nomStatus',{id:S.game.id}); } catch(e){}
 }
+/* 玩家声明自己准备好进入提名阶段：写进准备名单，圆桌上立刻显示小旗；
+   说书人会结合天平判断要不要真的进入（m11961）。 */
+async function declareReady(){
+  if (!S.game) return;
+  var seat = mySeatInGame(S.game);
+  if (seat < 0) { S.startError = '你现在不在座位上'; render(true); return; }
+  try { await api('nomReady',{id:S.game.id, seat:seat, yes:true}); }
+  catch(e){ S.startError = '声明失败：'+((e&&e.message)||e); render(true); return; }
+  try { S.nomReady = await api('nomReady',{id:S.game.id}); } catch(e){}
+  render(true);
+}
 async function startNomination(){
   if (!S.game) return;
   S.startError = '';
@@ -1065,6 +1078,9 @@ function nomPanel(){
         '<p class="muted">白天讨论得差不多了，就可以进入提名阶段：每位存活玩家每天有一次提名权，被提名者拿到的票数过半、且为当天最高，才会上处决台。</p>' +
         prog +
         '<div class="row"><button onclick="startNomination()">开始提名阶段</button>' +
+        (iAmPlayer(S.game) && mySeatInGame(S.game) >= 0 ? ('<div class="row"><button onclick="declareReady()">我准备好进入提名了</button>' +
+          ((S.nomReady && S.nomReady.readyCount) ? ('<span class="muted">已准备 ' + S.nomReady.readyCount + ' / ' + S.nomReady.aliveCount + ' 人</span>') : '') +
+          '</div>') : '') +
         '<button onclick="proposeNomination()">先问问大家愿不愿意</button></div>' +
         (S.nomAgreeMsg ? '<div class="muted">'+esc(S.nomAgreeMsg)+'</div>' : '') +
         '</div>';
@@ -1201,8 +1217,22 @@ function agentStorySection(){
   if (phase === 'night') doing = '正在按夜间顺序核对在场角色、唤醒角色、整理要私下告知的内容，并结算死亡与状态。';
   else if (phase === 'day' || phase === 'nomination' || phase === 'vote') doing = '正在梳理场上的讨论、权衡善良与邪恶双方的局势，判断是否发起提名处决。';
   else doing = '正在主持这一阶段。';
-  var out = '';
-  if (st.running) out = '<div class="muted">说书人正在思考：'+doing+'</div>';
+  /* 夜间是程序在按顺序推进：把「第几步 / 共几步 / 现在轮到谁」显示出来，
+     否则玩家只看到一个不会动的「思考中」，根本不知道卡在哪（m11816）。 */
+  var nst = S.nightState || null;
+  var nprog = '';
+  if (nst && nst.ok && phase === 'night') {
+    var curN = nst.current || null;
+    if (nst.finished) nprog = '<div class="nomgate">夜间流程已走完，正在等天亮。</div>';
+    else {
+      nprog = '<div class="nomgate">夜间进度：已完成 <b>' + nst.done + '</b> / 共 ' + nst.total + ' 步'
+        + (nst.awaiting ? ('　<span class="muted">等待玩家选择 ' + nst.awaiting + ' 项</span>') : '')
+        + (curN ? ('<div class="muted">当前：' + (curN.seat >= 0 ? ((curN.seat + 1) + ' 号 ') : '') + esc(curN.role || '')
+          + (curN.status === 'await' ? '（等玩家回答）' : '（处理中）') + '</div>') : '')
+        + '</div>';
+    }
+  }
+  if (st.running) out = '<div class="muted">说书人正在主持：'+doing+'</div>';
   else if (res){
     /* 只展示公开结果：说出口的话、死亡人数、进入的阶段、投票；不显示私有信息与标记数量 */
     var pub = [];
@@ -1217,7 +1247,7 @@ function agentStorySection(){
   return '<div class="section"><h3>Agent 说书人主持</h3>' +
     '<p class="muted">本局说书人由 Agent 担任，它会依规则主持当前阶段。下面只显示它公开的动作，私密信息不会显示在这里。</p>' +
     (iAmStoryteller(S.game) ? '<div class="row"><button onclick="runStory()" '+(st.running?'disabled':'')+'>'+(st.running?'进行中…':'让说书人 Agent 主持这一阶段')+'</button></div>' : '') +
-    out+'</div>';
+    nprog + out+'</div>';
 }
 
 function agentEndRow(){
@@ -2309,6 +2339,7 @@ async function refresh(){
   /* 提名时机闸门：白天时读一次，硬性上限/全员同意时自动进入提名阶段（每个白天只自动触发一次） */
   if (phNow === 'day' && canControl()) {
     try { S.nomGate = await api('nomGate',{id:S.game.id}); } catch(e){ S.nomGate = null; }
+    try { S.nomReady = await api('nomReady',{id:S.game.id}); } catch(e){ S.nomReady = null; }
     if (S.nomGate && S.nomGate.mustEnter && !nomActive() && S.nomGate.count >= 0) {
       var autoKey = S.game.id + '#' + (S.game.day||0);
       if (S.autoNomStarted !== autoKey) {
@@ -2321,6 +2352,10 @@ async function refresh(){
   if (iAmPlayer(S.game)){
     try { S.view = await api('view',{id:S.game.id, seat:mySeatInGame(S.game)}); } catch(e){}
   } else { S.view = null; }
+  /* 夜间程序化流程的进度：说书人页面与圆桌都要显示当前走到哪一步 */
+  if (S.game.phase === 'night' || S.game.phase === 'dawn') {
+    try { S.nightState = await api('nightState',{id:S.game.id}); } catch(e){ S.nightState = null; }
+  } else { S.nightState = null; }
   if (S.tab==='story' && !iAmStoryteller(S.game) && !(S.story && S.story.running)){
     try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){}
   }

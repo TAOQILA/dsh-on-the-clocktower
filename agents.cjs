@@ -1132,6 +1132,226 @@ async function askNomibationAgreement(id, opts) {
   return { ok: true, answers: out, yes: st.yes, no: st.no, allAgree: out.every(function (x) { return x.agree; }) };
 }
 /* ---------- 说书人 Agent 主持一夜 / 一天 ---------- */
+
+
+/* 进入提名阶段并启动流程：说书人已经判断要进，或者闸门到了，都由程序统一从这里进。
+   公告一律用预设句子，不依赖 Agent 说话（m11876/m11995）。 */
+function enterNominationPhase(id){
+  let s = null;
+  try { s = E.loadState(id); } catch (e) { return { ok:false, error:"对局不存在" }; }
+  if (!s || (s.phase !== "day" && s.phase !== "nomination")) return { ok:false, error:"现在不是白天" };
+  if (s.phase === "day") { try { E.setPhase(id, "nomination"); } catch (e) {} }
+  try { E.log(id, "系统", "进入提名阶段", true); } catch (e) {}
+  setTimeout(function () { try { runNomination(id, {}); } catch (e) {} }, 50);
+  return { ok:true, entered:true };
+}
+
+/* 有人声明「准备好进入提名」时，由说书人结合天平判断是否真的进入提名阶段。
+   说书人只返回标准 JSON，不发言——进入 / 不进入的公告一律由程序用预设句子发出（m11961/m11995）。 */
+async function nomReadyDecide(id, bySeat){
+  let s = null;
+  try { s = E.loadState(id); } catch (e) { return { ok:false, error:"对局不存在" }; }
+  if (!s || (s.phase !== "day" && s.phase !== "nomination")) return { ok:false, error:"现在不是白天" };
+  let rs = null;
+  try { rs = E.nomReadyState(id); } catch (e) { rs = null; }
+  if (!rs || !rs.ok) return { ok:false, error:"准备状态读取失败" };
+  /* 全员准备好：不必再问模型，直接由程序进入提名阶段 */
+  if (rs.aliveCount > 0 && rs.readyCount >= rs.aliveCount) {
+    try { E.log(id, "系统", "全部存活玩家都已准备进入提名，程序直接进入提名阶段", true); } catch (e) {}
+    enterNominationPhase(id);
+    return { ok:true, enter:true, reason:"全员准备" };
+  }
+  let gate = null;
+  try { gate = E.nomGate(id); } catch (e) { gate = null; }
+  if (gate && gate.mustEnter) { try { E.log(id, "系统", "已达到硬性上限或全员同意，直接进入提名阶段", true); } catch (e) {} enterNominationPhase(id); return { ok:true, enter:true, reason:"闸门" }; }
+  const v = viewForStoryteller(id);
+  const lines = [];
+  lines.push(ST_TONE);
+  lines.push("你是「血染钟鱼」的说书人。现在是第 " + (s.day || 1) + " 天白天，玩家们还在讨论。有人刚刚表示「我准备好进入提名了」。");
+  lines.push(stylePrompt(id));
+  lines.push(FACTION_RULES);
+  lines.push(BALANCE_RULES);
+  lines.push("【现在的准备情况】存活 " + rs.aliveCount + " 人，已准备 " + rs.readyCount + " 人（座位 " + rs.ready.map(function (i) { return (i + 1) + " 号"; }).join("、") + "）。刚刚表示准备好的是 " + ((Number(bySeat) + 1) + " 号") + "。");
+  if (gate) lines.push("【讨论时长】今天公聊已有 " + gate.count + " 条公开消息（最早 " + gate.cfg.min + "，通常 " + gate.cfg.softMax + "，上限 " + gate.cfg.hardMax + "）。");
+  lines.push("【判断】现在是否应该进入提名阶段？你要考虑：讨论是否已经充分、有没有人还有重要信息没说、强弱天平是否需要再给弱势方一点时间、有没有人明确表示还想继续聊。");
+  lines.push("只有少数人准备好、讨论还很短时，可以继续等；多数人准备好、或者讨论已经充分时，就进入。");
+  lines.push('严格只输出一个 JSON 对象：{"think":"你的判断","enter":true或false,"say":""}');
+  lines.push("say 一律写空字符串：这个阶段的所有公告都由程序用预设句子发出，你不需要说话。");
+  const route = routeFor(id, "storyteller");
+  let o = null;
+  try {
+    o = await Promise.race([
+      callModel({ game: id, seat: "storyteller", prompt: lines.join("\n"), provider: route.provider, model: route.model, system: storytellerSystem(id), maxTokens: 500 }),
+      new Promise(function (res) { setTimeout(function () { res({ error: "裁量调用超时" }); }, MODEL_TIMEOUT_MS); })
+    ]);
+  } catch (e) { o = { error: String((e && e.message) || e) }; }
+  if (!o || o.error) { E.log(id, "系统", "提名时机裁量失败，按「再等等」处理：" + String((o && o.error) || ""), true); return { ok:false, error:"裁量失败" }; }
+  let rp = null;
+  try { rp = parseReply(o.text); } catch (e) { rp = null; }
+  if (rp && rp.think) { try { E.think(id, "storyteller", rp.think); } catch (e) {} }
+  const enter = !!(rp && rp.raw && rp.raw.enter === true);
+  try { E.log(id, "系统", "说书人判断" + (enter ? "进入" : "暂不进入") + "提名阶段", true); } catch (e) {}
+  if (enter) enterNominationPhase(id);
+  return { ok:true, enter:enter, reason:'说书人判断' };
+}
+
+/* ==================== 程序化夜间主持（m11876 / m11961） ==================== */
+/* 规则能机械算的由 engine.nightExec 直接算并发私聊；
+   需要玩家自己选目标的，程序发预设问句、等回答、机械结算；
+   只有「可能」「由你决定」这类柔性裁量才叫说书人模型，并且它必须回标准 JSON。 */
+const NIGHT_ANSWER_MS = 90000;   /* 等一位玩家回答夜间选择的时限 */
+
+/* 等某座位就「夜间的某个选择」作答，收到后交给 engine 机械结算。返回 true 表示已结算 */
+async function waitNightAnswer(id, seat, sinceN){
+  const t0 = Date.now();
+  let seen = typeof sinceN === "number" ? sinceN : ((E.loadState(id).messages || []).length);
+  /* 选择不合法（选了自己、座位越界）时不能就这么干等：把错误告诉玩家，
+     再驱动它重想一次。最多重问 3 次，避免模型死磕同一个错误答案。 */
+  let retry = 0;
+  for (;;) {
+    const s = E.loadState(id);
+    const msgs = s.messages || [];
+    let bad = false;
+    for (let k = seen; k < msgs.length; k++) {
+      const m = msgs[k];
+      if (!m || m.from === "storyteller" || m.from === "admin") continue;
+      if (Number(m.from) !== Number(seat)) continue;
+      const r = E.nightAnswer(id, seat, m.text);
+      if (r && r.ok) return true;
+      if (r && r.error) {
+        bad = true;
+        try { E.say(id, "storyteller", String(r.error), "private", [seat]); } catch (e) {}
+      }
+    }
+    seen = msgs.length;
+    if (bad) {
+      retry++;
+      if (retry > 3) return false;
+      const st2 = E.loadState(id);
+      const step2 = ((st2.nightRun || {}).steps || []).filter(function (x) { return x.status === "await" && Number(x.seat) === Number(seat); })[0];
+      if (!step2) return false;
+      try { runRound(id, { seats: [seat], replyTo: "storyteller" }); } catch (e) {}
+    }
+    if (Date.now() - t0 >= NIGHT_ANSWER_MS) return false;
+    await sleep(600);
+  }
+}
+
+/* 柔性裁量：把这一步交给说书人模型，它必须返回标准 JSON，由程序落地 */
+async function runStoryDecision(id, step){
+  const v = viewForStoryteller(id);
+  const s = E.loadState(id);
+  const ri = roleInfo(step.role);
+  const lines = [];
+  lines.push(ST_TONE);
+  lines.push("你是「血染钟鱼」的说书人。现在是第 " + (s.night || 1) + " 夜，程序化的夜间流程正在进行，只剩这一个角色需要你行使裁量权。");
+  lines.push(stylePrompt(id));
+  lines.push(FACTION_RULES);
+  lines.push(BALANCE_RULES);
+  lines.push("【要处理的事】" + (Number(step.seat) + 1) + " 号 " + ((s.seats[step.seat] || {}).name || "") + " 的角色是【" + step.role + "】。");
+  if (ri && ri.ability) lines.push("【能力原文】" + String(ri.ability).replace(/\s+/g, " "));
+  lines.push("【为什么需要你】这条能力里有「可能」「由你决定」这类空间，程序无法机械判定。请结合全场局势与天平系统决定结果。规则里写死的部分不得改动。");
+  lines.push("【全场座位与真相】（座位号从 1 开始）");
+  v.seats.forEach(function (x) {
+    lines.push((x.seat + 1) + " 号：" + x.name + (x.alive ? "（存活）" : "（已死亡）") + " 角色=" + (x.role || "未分配")
+      + (x.markers.length ? (" 标记=" + x.markers.join(",")) : "")
+      + (x.info.length ? (" 已告知：" + x.info.map(function (i) { return i.text; }).join(" | ")) : ""));
+  });
+  lines.push("【公开对话记录】");
+  lines.push(renderMessages(v.messages, v.seats));
+  lines.push("严格只输出一个 JSON 对象，不要代码块、不要多余文字：");
+  lines.push('{"think":"你的裁判思路（不公开）",');
+  lines.push(' "info":[{"seat":座位号（1 起）,"text":"私下告知该玩家的信息"}],');
+  lines.push(' "markers":[{"seat":座位号（1 起）,"marker":"中毒/醉酒/被保护"}],');
+  lines.push(' "deaths":[座位号（1 起）],');
+  lines.push(' "ops":[{"op":"操作名","seat":座位号（1 起）,其余参数}]}');
+  lines.push("不需要给信息就写空数组；不要用 ops 替玩家做他能自己决定的事。");
+  const route = routeFor(id, "storyteller");
+  let o = null;
+  try {
+    o = await Promise.race([
+      callModel({ game: id, seat: "storyteller", prompt: lines.join("\n"), provider: route.provider, model: route.model, system: storytellerSystem(id) }),
+      new Promise(function (res) { setTimeout(function () { res({ error: "裁量调用超时" }); }, MODEL_TIMEOUT_MS); })
+    ]);
+  } catch (e) { o = { error: String((e && e.message) || e) }; }
+  const out = { info: 0, markers: 0, deaths: 0, ops: 0, win: null };
+  if (!o || o.error) {
+    E.log(id, "系统", "【" + step.role + "】的柔性裁量调用失败，按无效果处理：" + String((o && o.error) || ""), true);
+    E.nightMarkDone(id, step.key, "说书人裁定失败，按无效果处理");
+    return out;
+  }
+  let rp = null;
+  try { rp = parseReply(o.text); } catch (e) { rp = null; }
+  if (rp && rp.think) { try { E.think(id, "storyteller", rp.think); } catch (e) {} }
+  const toIdx = function (n) { const v0 = Number(n); if (!isFinite(v0)) return -1; const i = v0 - 1; return (i >= 0 && i < s.seats.length) ? i : -1; };
+  if (rp && Array.isArray(rp.info)) rp.info.forEach(function (x) { const i = toIdx(x.seat); if (i < 0) return; if (E.giveInfo(id, i, String(x.text || ""))) out.info++; });
+  if (rp && Array.isArray(rp.markers)) rp.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); out.markers++; } });
+  if (rp && Array.isArray(rp.deaths)) rp.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0 && E.kill(id, i, "夜间死亡")) out.deaths++; });
+  if (rp && Array.isArray(rp.ops) && rp.ops.length) {
+    const conv = rp.ops.map(function (o0) {
+      const o1 = Object.assign({}, o0);
+      if (o1.seat !== undefined && o1.seat !== null && o1.seat !== "") o1.seat = toIdx(o1.seat);
+      if (o1.a !== undefined) o1.a = toIdx(o1.a);
+      if (o1.b !== undefined) o1.b = toIdx(o1.b);
+      return o1;
+    });
+    const r = E.applyOps(id, conv);
+    out.ops = (r.roleChanges || 0) + (r.revives || 0) + (r.kills || 0) + (r.executes || 0) + (r.shields || 0) + (r.aligns || 0) + (r.apparent || 0) + (r.grants || 0) + (r.swaps || 0) + (r.markers || 0) + (r.wins || 0) + (r.exiles || 0) + (r.extra || 0);
+    if (r.wins) out.win = "ability";
+  }
+  E.nightMarkDone(id, step.key, "说书人裁量完成");
+  return out;
+}
+
+/* 程序化夜间主循环 */
+async function nightDriver(id, run){
+  {
+    const s0 = E.loadState(id);
+    if (s0.phase === "setup") { try { E.setPhase(id, "night"); } catch (e) {} }
+  }
+  const applied = { info: 0, markers: 0, deaths: 0, ops: 0, phase: null, win: null };
+  E.nightEnsure(id);
+  let guard = 0;
+  for (;;) {
+    guard++;
+    if (guard > 300) { E.log(id, "系统", "夜间流程步数超限，已强制停止", true); break; }
+    const s = E.loadState(id);
+    if (s.phase !== "night" && s.phase !== "dawn") break;
+    let r = null;
+    try { r = E.nightExec(id); } catch (e) { E.log(id, "系统", "夜间流程异常：" + String((e && e.message) || e), true); break; }
+    if (!r || !r.ok) break;
+    if (r.kind === "done") { applied.phase = r.phase || "day"; break; }
+    if (r.kind === "skip") continue;
+    if (r.kind === "info") { applied.info++; continue; }
+    if (r.kind === "ask") {
+      const seat = Number(r.step.seat);
+      const before = (E.loadState(id).messages || []).length;
+      try { E.giveInfo(id, seat, r.prompt); } catch (e) {}
+      try { runRound(id, { seats: [seat], replyTo: "storyteller" }); } catch (e) {}
+      const ok = await waitNightAnswer(id, seat, before);
+      if (!ok) {
+        E.log(id, "系统", "等待 " + (seat + 1) + " 号回答「" + r.step.role + "」超时，夜间流程暂停（可以再点一次主持继续）", true);
+        break;
+      }
+      applied.info++;
+      continue;
+    }
+    if (r.kind === "st") {
+      const d = await runStoryDecision(id, r.step);
+      applied.info += d.info; applied.markers += d.markers; applied.deaths += d.deaths; applied.ops += d.ops;
+      if (d.win) { applied.win = d.win; break; }
+      continue;
+    }
+    break;
+  }
+  const sEnd = E.loadState(id);
+  run.result = { think: "", say: "", applied: applied, raw: "" };
+  run.done = true;
+  E.log(id, "说书人", "夜间流程完成：告知 " + applied.info + " 条信息，标记 " + applied.markers + " 个状态，死亡 " + applied.deaths + " 人"
+    + (applied.ops ? ("，能力操作 " + applied.ops + " 项") : "")
+    + (applied.phase ? ("，进入 " + applied.phase) : ("，当前仍在 " + sEnd.phase)));
+}
+
 async function runStoryteller(id, opts) {
   opts = opts || {};
   const cur = STORY_RUNNING.get(id);
@@ -1144,6 +1364,8 @@ async function runStoryteller(id, opts) {
 
   (async function () {
     try {
+      /* 夜间：规则能机械算的全部交给 engine.nightExec，只有柔性裁量才问模型（m11876） */
+      if (isNight) { await nightDriver(id, run); return; }
       const route = routeFor(id, 'storyteller');
       /* 说书人思考期间如果有人在广场上插话，也要把这些话纳入判断 */
       const msgN = function () {
@@ -1868,6 +2090,7 @@ async function drainStoryChat(id) {
 }
 
 module.exports = {
+  nomReadyDecide, enterNominationPhase,
   askNomibationAgreement,
   runNomination, nomStatus, buildNomPrompt,
   viewFor, viewForStoryteller, buildPrompt, buildStorytellerNightPrompt, buildStorytellerDayPrompt,

@@ -884,8 +884,15 @@ function bluffRoles(id){
   return shuffle(pool).slice(0, 3);
 }
 /* 首夜把爪牙信息 / 恶魔信息下发给对应座位。重复调用安全（giveInfo 自带去重）*/
-function dealEvilInfo(id){
+function dealEvilInfo(id, force){
   const s = loadState(id);
+  /* 幂等：同一个夜晚只下发一次。dealRoles 与 setPhase 都会调用它，不去重的话
+     恶魔会连着收到两条爪牙信息、伪装身份还前后不一致。 */
+  s.extra = s.extra || {};
+  const tag = Number(s.night || 1);
+  if (!force && s.extra.evilInfoNight === tag) return { ok:true, skipped:true };
+  s.extra.evilInfoNight = tag;
+  saveState(id, s);
   const info = evilInfoFor(id);
   if (!info.demonSeats.length) return { ok:false, error:'本局还没有恶魔' };
   const nameOf = function(i){ return (i+1) + ' 号 ' + ((s.seats[i] && s.seats[i].name) || ''); };
@@ -1099,7 +1106,12 @@ function nomState(id){
       }
     } catch (e) {}
   });
+  let ready = [];
+  try { ready = nomReadyState(id).ready; } catch (e) {}
+  const aliveArr = [];
+  (s.seats || []).forEach(function (x, i) { if (s.alive[i]) aliveArr.push(i); });
   return { ok:true, nom:s.nom, alive:s.alive, deadVoteUsed:s.deadVoteUsed||{}, secret:secret, weights:w, butler:butler,
+    ready:ready, readyAll:(ready.length > 0 && ready.length === aliveArr.length),
     seats:s.seats.map(function(x,i){ return {name:x.name, alive:!!s.alive[i]}; }) };
 }
 function nomCanNominate(s, seat){
@@ -1899,7 +1911,317 @@ function nomClearIntents(id, seat){
   return { ok:true };
 }
 
-module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
+
+/* ==================== 程序化夜间主持（m11876） ====================
+   设计原则：规则能机械算出来的，全部由程序算并直接私聊告知玩家；
+   只有规则里写明「可能」「由你决定」「说书人选择」的内容才交给说书人 Agent 裁定。
+   每一夜生成一份按标准夜间顺序排好的清单，逐条推进，进度落库供前端展示。 */
+let NO_CACHE = null;
+function nightOrderData(){
+  if (NO_CACHE) return NO_CACHE;
+  try { NO_CACHE = JSON.parse(fs.readFileSync(path.join(__dirname,'data','nightorder.json'),'utf8')); }
+  catch(e){ NO_CACHE = { first: [], other: [] }; }
+  return NO_CACHE;
+}
+const NIGHT_KIND = {
+  '洗衣妇':'info','图书管理员':'info','调查员':'info','厨师':'info','共情者':'info',
+  '送葬者':'info','间谍':'info',
+  '占卜师':'choice','僧侣':'choice','投毒者':'choice','管家':'choice','小恶魔':'choice','守鸦人':'choice',
+  '士兵':'passive','镇长':'passive','贞洁者':'passive','猎手':'passive','圣徒':'passive',
+  '陌客':'passive','酒鬼':'passive','男爵':'passive','红唇女郎':'passive'
+};
+function nAlive(s){ const a=[]; Object.keys(s.alive||{}).forEach(function(k){ if(s.alive[k]) a.push(Number(k)); }); return a; }
+function nPick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function nSeatLabel(s, seat){ return (Number(seat)+1)+" 号 "+(s.seats[seat]?s.seats[seat].name:""); }
+function nRoleAt(s, seat){ return (s.roles && s.roles[seat]) || ""; }
+function nFacAt(s, seat){ return roleFaction(nRoleAt(s, seat)); }
+function nNeighborsAlive(s, seat){
+  const n=s.seats.length, out=[];
+  for (let k=1;k<n;k++){ const i=((seat-k)%n+n)%n; if (s.alive[i]) { out.push(i); break; } }
+  for (let k=1;k<n;k++){ const i=(seat+k)%n; if (s.alive[i]) { out.push(i); break; } }
+  return out;
+}
+function nIsBlocked(s, seat){ const ms=(s.markers&&s.markers[seat])||[]; return ms.some(function(m){ return /中毒|醉酒/.test(String(m)); }); }
+/* 机械可算的角色：直接算出信息文本 */
+const NIGHT_FIXED = {
+  '洗衣妇': function(s, seat){
+    const towns=[]; (s.seats||[]).forEach(function(x,i){ if(s.alive[i] && nFacAt(s,i)==="townsfolk") towns.push(i); });
+    if(!towns.length) return { text:"你今晚没有获得任何信息（场上没有镇民）。" };
+    const holder=nPick(towns); const role=nRoleAt(s,holder);
+    const others=nAlive(s).filter(function(i){ return i!==holder; });
+    if(!others.length) return { text:"你得知："+nSeatLabel(s,holder)+" 是【"+role+"】。" };
+    const other=nPick(others);
+    return { text:"你得知两名玩家："+nSeatLabel(s,holder)+" 与 "+nSeatLabel(s,other)+"。他们之中有一位是【"+role+"】。" };
+  },
+  '图书管理员': function(s){
+    const outs=[]; (s.seats||[]).forEach(function(x,i){ if(s.alive[i] && nFacAt(s,i)==="outsider") outs.push(i); });
+    if(!outs.length) return { text:"你得知：场上没有外来者。" };
+    const holder=nPick(outs); const role=nRoleAt(s,holder);
+    const others=nAlive(s).filter(function(i){ return i!==holder; });
+    if(!others.length) return { text:"你得知："+nSeatLabel(s,holder)+" 是【"+role+"】。" };
+    const other=nPick(others);
+    return { text:"你得知两名玩家："+nSeatLabel(s,holder)+" 与 "+nSeatLabel(s,other)+"。他们之中有一位是【"+role+"】。" };
+  },
+  '调查员': function(s){
+    const mins=[]; (s.seats||[]).forEach(function(x,i){ if(s.alive[i] && nFacAt(s,i)==="minion") mins.push(i); });
+    if(!mins.length) return { text:"你得知：场上没有爪牙。" };
+    const holder=nPick(mins); const role=nRoleAt(s,holder);
+    const others=nAlive(s).filter(function(i){ return i!==holder; });
+    if(!others.length) return { text:"你得知："+nSeatLabel(s,holder)+" 是【"+role+"】。" };
+    const other=nPick(others);
+    return { text:"你得知两名玩家："+nSeatLabel(s,holder)+" 与 "+nSeatLabel(s,other)+"。他们之中有一位是【"+role+"】。" };
+  },
+  '厨师': function(s){
+    const alive=nAlive(s); let pairs=0;
+    if(alive.length>=2){
+      for(let i=0;i+1<alive.length;i++){ if(isEvilSeat(s,alive[i]) && isEvilSeat(s,alive[i+1])) pairs++; }
+      if(alive.length>2 && isEvilSeat(s,alive[alive.length-1]) && isEvilSeat(s,alive[0])) pairs++;
+    }
+    return { text:"你得知：场上邻座的邪恶玩家有 "+pairs+" 对。" };
+  },
+  '共情者': function(s, seat){
+    const nb=nNeighborsAlive(s,seat);
+    let evil=0; nb.forEach(function(i){ if(isEvilSeat(s,i)) evil++; });
+    return { text:"你得知：与你邻近的 "+nb.length+" 名存活玩家中，有 "+evil+" 名邪恶玩家。" };
+  },
+  '送葬者': function(s){
+    const ex=(s.nominations||[]).filter(function(x){ return x && x.kind==="execute" && Number(x.day)===Number(s.day); });
+    if(!ex.length) return { text:"今天白天没有人被处决，你没有获得信息。" };
+    const t=ex[ex.length-1].seat;
+    return { text:"今天被处决的是 "+nSeatLabel(s,t)+"，他的角色是【"+nRoleAt(s,t)+"】。" };
+  },
+  '间谍': function(s){
+    const rows=[]; (s.seats||[]).forEach(function(x,i){ rows.push((i+1)+" 号 "+x.name+(s.alive[i]?"（存活）":"（已死亡）")+"："+(nRoleAt(s,i)||"未分配")); });
+    return { text:"你查看了魔典（本局真实名单）：\n"+rows.join("\n") };
+  }
+};
+/* 需要玩家自己选目标的角色：程序发预设问句，收到回答后机械结算 */
+const NIGHT_CHOOSE = {
+  '占卜师': { prompt:"占卜师，请选择两名你想查验的玩家（回复两个座位号，例如「2 号 和 5 号」）。",
+    resolve: function(id, s, seat, seats){
+      if(seats.length<2) return { error:"请选择两名玩家" };
+      const a=seats[0], b=seats[1];
+      const has=isEvilSeat(s,a)&&nFacAt(s,a)==="demon" || isEvilSeat(s,b)&&nFacAt(s,b)==="demon";
+      return { text:"你查验了 "+nSeatLabel(s,a)+" 与 "+nSeatLabel(s,b)+"：其中"+(has?"有":"没有")+"恶魔。" };
+    } },
+  '僧侣': { prompt:"僧侣，请选择一名除你以外的玩家保护（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      let t=seats[0]; if(t===seat) return { error:"不能选择自己，请重新选一名玩家" };
+      setShield(id, t, "僧侣保护");
+      return { text:"你保护了 "+nSeatLabel(s,t)+"，今晚恶魔的负面能力对他无效。" };
+    } },
+  '投毒者': { prompt:"投毒者，请选择一名玩家毒害（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t=seats[0]; setMarker(id, t, "中毒", "day");
+      return { text:"你毒害了 "+nSeatLabel(s,t)+"，他在今晚和明天白天中毒。" };
+    } },
+  '管家': { prompt:"管家，请选择一名除你以外的玩家作为主人（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      let t=seats[0]; if(t===seat) return { error:"不能选择自己，请重新选一名玩家" };
+      setMarker(id, seat, "主人:"+(t+1), "day");
+      return { text:"你选择了 "+nSeatLabel(s,t)+" 作为你的主人。明天白天只有他投票时你才能投票。" };
+    } },
+  '小恶魔': { prompt:"小恶魔，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t=seats[0];
+      const r=kill(id, t, "被恶魔杀害");
+      if(r && r.blocked) return { text:"你选择了 "+nSeatLabel(s,t)+"，但他今晚安然无恙。" };
+      if(t===seat) return { text:"你选择了杀死自己。" };
+      return { text:"你选择了 "+nSeatLabel(s,t)+"，他在夜里死亡。" };
+    } },
+  '守鸦人': { prompt:"守鸦人，你在夜里死亡了。请选择一名玩家，你会得知他的角色（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t=seats[0];
+      return { text:"你得知 "+nSeatLabel(s,t)+" 的角色是【"+nRoleAt(s,t)+"】。" };
+    } }
+};
+/* 按标准顺序生成当夜清单 */
+function nightBuildRun(s){
+  const d=nightOrderData();
+  const isFirst=Number(s.night||1)<=1;
+  const seq=(isFirst?d.first:d.other)||[];
+  const present={};
+  Object.keys(s.roles||{}).forEach(function(k){ const name=String(s.roles[k]||"").trim(); if(!name) return; (present[name]=present[name]||[]).push(Number(k)); });
+  const steps=[];
+  const pushStep=function(role, seat){
+    steps.push({ key:String(seat)+"|"+role, role:role, seat:Number(seat), status:"pending", mode:null, note:"" });
+  };
+  seq.forEach(function(name){
+    if(name==="爪牙信息"||name==="恶魔信息") return;
+    const list=present[name]; if(!list) return;
+    list.forEach(function(seat){ pushStep(name, seat); });
+    delete present[name];
+  });
+  /* 顺序表没有收录、但本夜确实会发动能力的角色，补到末尾 */
+  Object.keys(present).forEach(function(name){
+    const info=roleInfoByName(name);
+    if(!info) return;
+    const acts=isFirst ? !!info.first_night : !!info.other_nights;
+    if(!acts) return;
+    if((NIGHT_KIND[name]||"st")==="passive") return;
+    present[name].forEach(function(seat){ pushStep(name, seat); });
+  });
+  return { night:Number(s.night||1), steps:steps, startedAt:new Date().toISOString(), finished:false };
+}
+function nightEnsure(id){
+  const s=loadState(id);
+  const n=Number(s.night||1);
+  if(!s.nightRun || Number(s.nightRun.night)!==n || !Array.isArray(s.nightRun.steps) || !s.nightRun.steps.length){
+    s.nightRun=nightBuildRun(s);
+    saveState(id,s);
+  }
+  return s;
+}
+function nightPending(s){
+  const run=s.nightRun||{steps:[]};
+  const pending=run.steps.filter(function(x){ return x.status==="pending"; }).length;
+  const awaitN=run.steps.filter(function(x){ return x.status==="await"; }).length;
+  const done=run.steps.filter(function(x){ return x.status==="done"||x.status==="skipped"; }).length;
+  return { total:run.steps.length, done:done, pending:pending, await:awaitN };
+}
+/* 推进一步：返回 {ok,kind}，kind 为 info / ask / skip / st / done */
+function nightExec(id){
+  const s=nightEnsure(id);
+  const run=s.nightRun;
+  /* 守鸦人：本夜死亡才触发，动态补一步 */
+  (s.seats||[]).forEach(function(x, seat){
+    if(nRoleAt(s,seat)!=="守鸦人") return;
+    if(s.alive[seat]) return;
+    if((s.nightDeaths||[]).indexOf(seat)<0) return;
+    const key=seat+"|守鸦人";
+    if(run.steps.some(function(y){ return y.key===key && (y.status==="done"||y.status==="await"); })) return;
+    const exist=run.steps.filter(function(y){ return y.key===key; })[0];
+    if(exist) { exist.status="pending"; } else { run.steps.push({ key:key, role:"守鸦人", seat:seat, status:"pending", mode:"choice", note:"" }); }
+  });
+  const step=run.steps.filter(function(x){ return x.status==="pending"; })[0];
+  if(!step){
+    run.finished=true; saveState(id,s);
+    let ch=null;
+    if(s.phase==="night"||s.phase==="dawn"){ ch=setPhase(id,"day"); }
+    return { ok:true, kind:"done", phase:(ch&&ch.ok&&ch.state)?ch.state.phase:(ch&&ch.phase)||s.phase };
+  }
+  const kind=NIGHT_KIND[step.role]||"st";
+  step.mode=kind;
+  if(kind==="passive"){ step.status="skipped"; step.note="无需夜间行动"; saveState(id,s); return { ok:true, kind:"skip", step:step }; }
+  if(kind==="info"){
+    const fn=NIGHT_FIXED[step.role];
+    if(!fn){ step.status="manual"; saveState(id,s); return { ok:true, kind:"st", step:step }; }
+    if(nIsBlocked(s,step.seat)){
+      step.status="done"; step.note="（该角色处于中毒/醉酒，能力未正常生效）";
+      giveInfo(id, step.seat, "你今晚没有获得任何信息。");
+      saveState(id,s);
+      log(id,"说书人",nSeatLabel(s,step.seat)+" 的【"+step.role+"】能力因中毒/醉酒被屏蔽",true);
+      return { ok:true, kind:"info", step:step, text:"（能力被屏蔽）" };
+    }
+    const r=fn(s, step.seat);
+    step.status="done"; step.note=r.text;
+    giveInfo(id, step.seat, r.text);
+    saveState(id,s);
+    return { ok:true, kind:"info", step:step, text:r.text };
+  }
+  if(kind==="choice"){
+    const h=NIGHT_CHOOSE[step.role];
+    step.status="await"; saveState(id,s);
+    return { ok:true, kind:"ask", step:step, prompt:(h&&h.prompt)||"请告诉我你想选择的目标（回复座位号）。" };
+  }
+  step.status="manual"; saveState(id,s);
+  return { ok:true, kind:"st", step:step };
+}
+/* 玩家回答了一个等待中的选择 */
+function nightAnswer(id, seat, text){
+  const s=nightEnsure(id);
+  const step=(s.nightRun.steps||[]).filter(function(x){ return x.status==="await" && Number(x.seat)===Number(seat); })[0];
+  if(!step) return { ok:false, error:"现在没有在等你的选择" };
+  const seats=nightParseSeats(s, text);
+  if(!seats.length) return { ok:false, error:"没看出你要选哪个座位，请回复座位号" };
+  const h=NIGHT_CHOOSE[step.role];
+  if(!h) return { ok:false, error:"这一步不能由玩家回答" };
+  const r=h.resolve(id, s, Number(seat), seats);
+  if(r && r.error) return { ok:false, error:r.error };
+  step.status="done"; step.note=r.text;
+  giveInfo(id, Number(seat), r.text);
+  saveState(id,s);
+  return { ok:true, text:r.text };
+}
+/* 说书人裁定完成一个 manual 步骤 */
+function nightMarkDone(id, key, note){
+  const s=nightEnsure(id);
+  const step=(s.nightRun.steps||[]).filter(function(x){ return x.key===String(key); })[0];
+  if(!step) return { ok:false, error:"没有这一步" };
+  step.status="done"; step.note=String(note||"");
+  saveState(id,s);
+  return { ok:true };
+}
+function nightProgress(id, full){
+  let s; try { s=loadState(id); } catch(e){ return null; }
+  if(!s.nightRun) return null;
+  const p=nightPending(s);
+  const cur=(s.nightRun.steps||[]).filter(function(x){ return x.status==="pending"||x.status==="await"; })[0]||null;
+  const out={ night:s.nightRun.night, total:p.total, done:p.done, pending:p.pending, awaiting:p.await, finished:!!s.nightRun.finished,
+    current: cur ? { seat:Number(cur.seat)+1, status:cur.status } : null };
+  if(full){
+    out.steps=(s.nightRun.steps||[]).map(function(x){ return { seat:Number(x.seat)+1, role:x.role, mode:x.mode, status:x.status, note:x.note||"" }; });
+  }
+  return out;
+}
+/* 从一段自然语言里解析出座位号（0 起）；支持「3 号」「三号」「3」「昵称」 */
+function nightParseSeats(s, text){
+  const out=[];
+  const push=function(v){ const i=Number(v)-1; if(i>=0 && i<s.seats.length && out.indexOf(i)<0) out.push(i); };
+  const str=String(text||"");
+  const cn={"零":0,"一":1,"二":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
+  const toInt=function(t){ if(/^\d+$/.test(t)) return Number(t); let v=0, ok=false; for(let i=0;i<t.length;i++){ const ch=t.charAt(i); if(ch==="十"){ v=(v||1)*10; ok=true; } else if(cn[ch]!==undefined){ v+=cn[ch]; ok=true; } else return NaN; } return ok?v:NaN; };
+  const re=/([0-9]{1,2}|[一二两三四五六七八九十]{1,3})\s*(号|號)/g;
+  let m; while((m=re.exec(str))){ const v=toInt(m[1]); if(!isNaN(v)) push(v); }
+  if(!out.length){ const re2=/([0-9]{1,2})/g; while((m=re2.exec(str))){ push(Number(m[1])); } }
+  if(!out.length){
+    const names=[]; (s.seats||[]).forEach(function(x,i){ const nm=String((x&&x.name)||""); if(nm.length>=2) names.push({ i:i, n:nm }); });
+    names.sort(function(a,b){ return b.n.length-a.n.length; });
+    names.forEach(function(o){ if(str.indexOf(o.n)>=0 && out.indexOf(o.i)<0) out.push(o.i); });
+  }
+  return out;
+}
+
+
+/* ==================== 提名准备度（m11961） ==================== */
+/* 每个存活玩家随时可以声明「我准备好进入提名了」：AI 用标准句式发言，真人点按钮。
+   准备状态显示在圆桌上；是否真的进入提名由说书人结合天平判断（程序兜底：全员准备必定进入）。 */
+function nomReadyEnsure(s){
+  if (!s.nomReady || Number(s.nomReady.day) !== Number(s.day)) s.nomReady = { day: Number(s.day||0), ready: {} };
+  return s.nomReady;
+}
+function nomSetReady(id, seat, yes){
+  const s = loadState(id);
+  const st = nomReadyEnsure(s);
+  const i = Number(seat);
+  if (!(i >= 0 && i < s.seats.length)) return { ok:false, error:"座位不存在" };
+  if (yes === false) delete st.ready[i]; else st.ready[i] = true;
+  saveState(id, s);
+  return { ok:true, ready:Object.keys(st.ready).map(Number), all:nomReadyAll(id) };
+}
+function nomReadyState(id){
+  const s = loadState(id);
+  const st = nomReadyEnsure(s);
+  const alive = [];
+  Object.keys(s.alive||{}).forEach(function(k){ if (s.alive[k]) alive.push(Number(k)); });
+  const ready = Object.keys(st.ready).map(Number).filter(function(i){ return s.alive[i]; });
+  return { ok:true, day:st.day, ready:ready, alive:alive, readyCount:ready.length, aliveCount:alive.length };
+}
+function nomReadyAll(id){
+  const r = nomReadyState(id);
+  return r.aliveCount > 0 && r.readyCount >= r.aliveCount;
+}
+/* 从一句公聊里识别「我准备好进入提名了」这类表态 */
+function nomReadyFromChat(id, seat, text){
+  const t = String(text||"");
+  if (!/提名/.test(t)) return { handled:false };
+  if (/(不|别|先不|还没|没有|不想|不用).{0,3}(准备|提名)/.test(t)) return { handled:false };
+  if (!/(准备好|准备|可以进|进提名|开始提名|进入提名|随时可以|我同意|同意进入)/.test(t)) return { handled:false };
+  const r = nomSetReady(id, seat, true);
+  return { handled:true, ready:r };
+}
+
+module.exports = { nomSetReady, nomReadyState, nomReadyAll, nomReadyEnsure, nomReadyFromChat, nightExec, nightAnswer, nightMarkDone, nightProgress, nightBuildRun, nightEnsure, nightPending, nightParseSeats, NIGHT_KIND, createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
   dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
