@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.9';
+var VERSION = '0.14.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{} };
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0 };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -469,9 +469,11 @@ function drawTable(seats,g){
     var role = g && g.roles[i] ? g.roles[i] : (s.role||'');
     if (g && !iAmStoryteller(g) && !iAmSpectator(g) && i !== mySeatInGame(g) && !(g.win && g.win.over)) role = '';
     var marks = g && g.markers[i] ? g.markers[i].join(' ') : '';
+    var nc = nomCur();
+    var handUp = !!(nc && nc.hands && nc.hands[i] === true);
     var bub = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
     el.innerHTML = (bub ? '<div class="bubbles">'+bub+'</div>' : '') +
-      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div><div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
+      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
       '<div class="nameline"><div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
@@ -855,7 +857,174 @@ function winBanner(g){
 /* 游戏页：先说明你是谁，再看当前选中座位的详情。
    说书人给你的信息不再单独列板块，而是说书人亲自私聊你（见「私聊」浮层）。 */
 function gamePanel(seats,sel){
-  return myIdentityPanel() + seatPanel(seats,sel);
+  return nomPanel() + myIdentityPanel() + seatPanel(seats,sel);
+}
+/* ---------- 提名与投票阶段面板 ---------- */
+function nomObj(){ return (S.nom && S.nom.nom) ? S.nom.nom : null; }
+function nomCur(){ var n = nomObj(); return (n && n.cur) ? n.cur : null; }
+function nomStage(){ var n = nomObj(); return n ? String(n.stage || 'idle') : 'idle'; }
+function nomActive(){
+  if (!S.game || (S.game.win && S.game.win.over)) return false;
+  if (S.nomRun && S.nomRun.running) return true;
+  var ph = S.game.phase;
+  if (ph === 'nomination' || ph === 'vote') return true;
+  var st = nomStage();
+  return !!(st && st !== 'idle' && st !== 'done');
+}
+async function loadNom(){
+  if (!S.game || (S.game.win && S.game.win.over)) { S.nom = null; S.nomRun = null; return; }
+  try { S.nom = await api('nomState',{id:S.game.id}); } catch(e){}
+  try { S.nomRun = await api('nomStatus',{id:S.game.id}); } catch(e){}
+}
+async function startNomination(){
+  if (!S.game) return;
+  S.startError = '';
+  try { await api('nomination',{id:S.game.id}); }
+  catch(e){ S.startError = '启动提名失败：'+((e&&e.message)||e); render(true); return; }
+  await loadNom(); render(); pollNom();
+}
+function pollNom(){
+  if (!S.game) return;
+  if (S.nomPolling) return;
+  S.nomPolling = true;
+  setTimeout(async function(){
+    try { await loadNom(); } catch(e) {}
+    render();
+    if (S.game && nomActive()) pollNom(); else S.nomPolling = false;
+  }, 900);
+}
+async function doNomPropose(){
+  if (!S.game) return;
+  var tg = (+(($('#nomTargetSel')||{}).value || 0)) - 1;
+  var rs = (($('#nomReasonIn')||{}).value || '').trim();
+  if (!(tg >= 0)) { S.startError = '先选一个要提名的对象'; render(true); return; }
+  try {
+    var r = await api('nomPropose',{id:S.game.id, from:mySeatInGame(S.game), target:tg, reason:rs});
+    if (r && r.ok === false) { S.startError = r.error || '提名失败'; render(true); return; }
+  } catch(e){ S.startError = '提名失败：'+((e&&e.message)||e); render(true); return; }
+  await loadNom(); render(true); pollNom();
+}
+async function doNomSkip(){
+  if (!S.game) return;
+  try { await api('nomSkip',{id:S.game.id, seat:mySeatInGame(S.game)}); } catch(e){}
+  render(true);
+}
+async function doNomHand(yes){
+  if (!S.game) return;
+  try { await api('nomHand',{id:S.game.id, seat:mySeatInGame(S.game), yes:!!yes}); } catch(e){}
+  await loadNom(); render(true); pollNom();
+}
+async function doNomDefense(){
+  if (!S.game) return;
+  var txt = (($('#nomDefIn')||{}).value || '').trim();
+  if (!txt) { S.startError='先写一句被提名发言'; render(true); return; }
+  try { await api('nomSpeech',{id:S.game.id, kind:'defense', text:txt}); } catch(e){}
+  await loadNom(); render(true); pollNom();
+}
+async function doNomFinish(){
+  if (!S.game) return;
+  try { await api('nomFinish',{id:S.game.id}); } catch(e){}
+  await loadNom(); await refresh();
+}
+function nomPanel(){
+  if (!S.game) return '';
+  var control = canControl();
+  if (!nomActive()){
+    if (S.game.phase === 'day' && control){
+      return '<div class="section"><h3>提名与投票</h3>' +
+        '<p class="muted">白天讨论得差不多了，就可以进入提名阶段：每位存活玩家每天有一次提名权，被提名者拿到的票数过半、且为当天最高，才会上处决台。</p>' +
+        '<div class="row"><button onclick="startNomination()">开始提名阶段</button></div></div>';
+    }
+    return '';
+  }
+  var n = nomObj() || {};
+  var cur = nomCur();
+  var stage = nomStage();
+  var seats = S.game.seats || [];
+  var alive = (S.game.alive || []);
+  var mySeat = mySeatInGame(S.game);
+  var names = function(i){ return (i+1) + ' 号 ' + ((seats[i]||{}).name||''); };
+  var h = '';
+  h += '<div class="section nombox"><h3>提名与投票</h3>';
+  var tip = '准备中…';
+  if (stage === 'ask') tip = '说书人正在询问有提名权的人是否要发起提名。';
+  else if (stage === 'defense') tip = '被提名者正在做被提名发言。';
+  else if (stage === 'vote') tip = '正在投票：举手表示赞成今天处决这个人。';
+  else if (stage === 'clock') tip = '正在逐格计时锁定票数。';
+  else if (stage === 'result') tip = '这一项提名已经统计完毕。';
+  else if (stage === 'finish' || stage === 'done') tip = '提名阶段正在收尾。';
+  h += '<p class="muted">' + tip + '</p>';
+  if (S.nomRun && S.nomRun.running) h += '<div class="muted">说书人正在处理提名流程…</div>';
+  if (S.nomRun && S.nomRun.error) h += '<div class="errbox">'+esc(S.nomRun.error)+'</div>';
+  if (cur && stage !== 'ask'){
+    h += '<div class="nomcur">';
+    h += '<div><b>' + names(cur.from) + '</b> 提名 <b>' + names(cur.target) + '</b></div>';
+    if (cur.reason) h += '<div class="muted">理由：' + esc(cur.reason) + '</div>';
+    if (cur.defense) h += '<div class="muted">被提名发言：' + esc(cur.defense) + '</div>';
+    h += '</div>';
+  }
+  var iLive = !!(S.game && S.game.alive && S.game.alive[mySeat]);
+  var usedNom = !!(n.usedNom && n.usedNom[mySeat]);
+  var asked = !!(n.asked && n.asked[mySeat]);
+  if (stage === 'ask' && control && iAmPlayer(S.game) && iLive && !usedNom && !asked){
+    var opts = '';
+    for (var i=0;i<seats.length;i++){
+      if (!alive[i]) continue;
+      if (n.usedTarget && n.usedTarget[i]) continue;
+      opts += '<option value="'+(i)+'">'+(i+1)+' 号 '+esc(seats[i].name)+'</option>';
+    }
+    if (opts){
+      h += '<div class="row">提名 '+(mySeat+1)+' 号 → <select id="nomTargetSel">'+opts+'</select></div>';
+      h += '<div class="row"><input id="nomReasonIn" placeholder="提名理由（会公开说给全桌）" style="flex:1"></div>';
+      h += '<div class="row"><button onclick="doNomPropose()">提名</button><button onclick="doNomSkip()">不提名</button></div>';
+    } else {
+      h += '<div class="row"><button onclick="doNomSkip()">今天不再提名</button></div>';
+    }
+  }
+  if (stage === 'defense' && cur && cur.target === mySeat && control && iAmPlayer(S.game)){
+    h += '<div class="row"><input id="nomDefIn" placeholder="你的被提名发言" style="flex:1"><button onclick="doNomDefense()">发言</button></div>';
+  }
+  if (stage === 'vote' && cur && control && iAmPlayer(S.game)){
+    var myHand = cur.hands ? cur.hands[mySeat] : undefined;
+    if (myHand === undefined){
+      h += '<div class="row nomvote"><button onclick="doNomHand(true)">举手赞成</button><button onclick="doNomHand(false)">不举手</button></div>';
+    } else {
+      h += '<div class="muted">你已经' + (myHand ? '举手赞成' : '没有举手') + '。</div>';
+      h += '<div class="row nomvote"><button onclick="doNomHand(true)">改为举手</button><button onclick="doNomHand(false)">改为不举手</button></div>';
+    }
+  }
+  if ((stage === 'vote' || stage === 'clock') && cur && cur.order && cur.order.length){
+    var ptr = (typeof cur.ptr === 'number') ? cur.ptr : -1;
+    h += '<div class="nomclock">';
+    cur.order.forEach(function(s2, k){
+      var cls = 'nomclk';
+      if (k <= ptr) cls += ' passed';
+      if (k === ptr) cls += ' now';
+      var hand = cur.hands ? cur.hands[s2] : undefined;
+      var mk = (hand === true) ? ' ✋' : ((hand === false) ? ' ✊' : '');
+      h += '<span class="'+cls+'">'+(s2+1)+mk+'</span>';
+    });
+    h += '</div>';
+  }
+  var results = n.results || [];
+  if (results.length){
+    h += '<div class="nomres">';
+    results.slice(-4).forEach(function(r){
+      h += '<div>' + names(r.target) + ' 获得 ' + r.votes + ' 票（存活 ' + r.aliveCount + ' 人，需 ' + Math.ceil(r.aliveCount/2) + ' 票）· ' + (r.passed ? '上处决台' : '未上处决台') + '</div>';
+    });
+    h += '</div>';
+  }
+  if (n.onBlock){
+    h += '<div class="nomblock">当前在处决台上：' + names(n.onBlock.target) + '（' + n.onBlock.votes + ' 票）</div>';
+  }
+  if (n.queue && n.queue.length){
+    h += '<div class="muted">待处理提名：' + n.queue.map(function(q){ return names(q.from)+' → '+names(q.target); }).join('；') + '</div>';
+  }
+  if (control && iAmStoryteller(S.game) && (stage === 'result' || stage === 'ask' || stage === 'done')){
+    h += '<div class="row"><button onclick="doNomFinish()">结束提名并结算处决</button></div>';
+  }
+  h += '</div>';
+  return h;
 }
 function seatPanel(seats,sel){
   var ro = S.game && !canControl();
@@ -1738,6 +1907,12 @@ async function refresh(){
   if(!S.round || !S.round.running){
     try { S.round = await api('roundStatus',{id:S.game.id}); } catch(e){}
   }
+  /* 提名阶段状态：从游戏进白天/提名起就常驻拉取，面板与头像举手标记都靠它 */
+  var phNow = S.game.phase;
+  if (phNow === 'day' || phNow === 'nomination' || phNow === 'vote' || (S.nom && S.nom.nom && S.nom.nom.stage && S.nom.nom.stage !== 'idle' && S.nom.nom.stage !== 'done')) {
+    await loadNom();
+  } else { S.nom = null; S.nomRun = null; }
+  if (nomActive() && !S.nomPolling) pollNom();
   if (iAmPlayer(S.game)){
     try { S.view = await api('view',{id:S.game.id, seat:mySeatInGame(S.game)}); } catch(e){}
   } else { S.view = null; }

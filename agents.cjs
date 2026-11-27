@@ -1028,6 +1028,245 @@ async function runStoryteller(id, opts) {
   return { ok: true, started: true, phase: s.phase, mode: isNight ? 'night' : 'day' };
 }
 
+/* ==================== 提名阶段驱动（m08944 / m08974 / m08987） ==================== */
+/* 一次 runNomination 走完整个提名阶段：
+   1) 逐个询问还有提名权的存活玩家要不要提名谁；
+   2) 队列里的提名按先后顺序逐个处理：提名理由 → 被提名发言 → 投票（AI 各自决定举手）→ 时钟轮转锁定 → 结算；
+   3) 队列空了再问一轮「还有没有人提名」，所有有提名权的人都表态过才收尾；
+   4) 宣布处决结果（在处决台上票最高者）并进入夜晚。 */
+const NOM_RUNNING = new Map();
+const NOM_ASK_WAIT_MS = 45000;   /* 等真人表态的最长时间 */
+const NOM_TICK_MS = 620;         /* 时钟每转一格 */
+
+function nomStatus(id){
+  const r = NOM_RUNNING.get(id);
+  if (!r) return { running:false, stage:'idle', log:[] };
+  return { running:r.running, stage:r.stage, log:r.log.slice(-40), error:r.error || null, cur:r.cur || null };
+}
+
+function nomSay(id, text){
+  if (!text) return;
+  E.say(id, 'storyteller', String(text), 'town');
+}
+
+/* 提名相关的专用提示词：让模型只判断「要不要提名 / 怎么辩护 / 举不举手」 */
+function buildNomPrompt(id, seat, kind, extra){
+  const v = viewFor(id, seat);
+  const s = E.loadState(id);
+  const lines = [];
+  lines.push('【局面】第 ' + (s.day||1) + ' 天白天，提名与投票阶段。存活 ' + v.aliveList.join('、') + '；已出局 ' + (v.deadList.join('、') || '无') + '。');
+  lines.push('【你的身份】你是 ' + (seat+1) + ' 号 ' + v.name + '，角色 ' + (v.role || '未知') + (v.ability ? ('（' + v.ability + '）') : '') + '。');
+  if (v.privateInfo && v.privateInfo.length) lines.push('【你掌握的私下信息】\n' + v.privateInfo.join('\n'));
+  lines.push('【最近的公开对话】\n' + renderMessages(v.messages, s.seats));
+  lines.push(stylePrompt(id));
+  if (kind === 'propose') {
+    lines.push('【现在】轮到你表态：今天要不要发起提名？');
+    lines.push('规则：每位存活玩家每天只有 1 次提名权；同一时间只能有一项提名；可以提名自己。');
+    lines.push('想提名就把 nominate 写 true，并在 target 写被提名者的座位号（从 1 开始），reason 写你要公开说的提名理由（一两句，直接对全桌说，不要写「我要提名」以外的客套）。');
+    lines.push('不想提名就 nominate 写 false，target 写 0，reason 留空。不要为了凑热闹乱提名。');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","nominate":true或false,"target":座位号,"reason":"提名理由"}');
+  } else if (kind === 'defense') {
+    lines.push('【现在】你被 ' + extra.from + ' 号 ' + extra.fromName + ' 提名了，理由：「' + (extra.reason||'（没有说明）') + '」。');
+    lines.push('请做被提名发言：为自己辩护、说明你的身份与信息、或者指出提名者的破绽。一两句话，直接对全桌说。');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","say":"你的被提名发言"}');
+  } else {
+    lines.push('【现在】正在对 ' + extra.target + ' 号 ' + extra.targetName + ' 投票（被提名理由：「' + (extra.reason||'无') + '」）。');
+    lines.push('请决定你要不要举手赞成处决他。举手就是公开支持今天处决这个人。');
+    lines.push('判断依据：你信不信他的身份、他的死对哪一方有利、你自己会不会因此暴露。想清楚再举手，别随大流。');
+    if (extra.dead) lines.push('注意：你已经出局，这一票是你的死亡票，投出去就没有了（除非你复活）。');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","hand":true或false,"say":"可选，一句公开表态，不想说就留空"}');
+  }
+  return { prompt: lines.join('\n'), view: v };
+}
+
+async function askSeat(id, seat, kind, extra){
+  const built = buildNomPrompt(id, seat, kind, extra || {});
+  const route = routeFor(id, seat);
+  const out = await callModel({ game:id, seat:seat, prompt:built.prompt, system:playerSystem(id, seat), provider:route.provider, model:route.model });
+  if (out && out.error) return { error: out.error };
+  const p = parseReply(out.text);
+  if (p.think) E.think(id, seat, p.think);
+  const obj = extractObject(String(out.text || ''));
+  return { parsed:p, obj:obj || {} };
+}
+
+function seatType(s, i){ return (s.seats[i] && s.seats[i].type === 'player') ? 'player' : 'agent'; }
+
+/* 等真人把某个动作做完（看完 stage 变了或超时） */
+async function waitStage(id, want, capMs){
+  const t0 = Date.now();
+  for (;;) {
+    const st = E.nomState(id);
+    if (!st.ok) return false;
+    if (st.nom.stage === want) return true;
+    if (st.nom.stage === 'result' || st.nom.stage === 'done' || !st.nom.cur) return false;
+    if (Date.now() - t0 > (capMs || NOM_ASK_WAIT_MS)) return false;
+    await sleep(500);
+  }
+}
+
+async function runNomination(id, opts){
+  opts = opts || {};
+  const curRun = NOM_RUNNING.get(id);
+  if (curRun && curRun.running) return { ok:false, error:'提名阶段正在处理中' };
+  const s0 = E.loadState(id);
+  if (s0.phase !== 'day' && s0.phase !== 'nomination' && s0.phase !== 'vote') {
+    return { ok:false, error:'现在不是白天的提名阶段' };
+  }
+  const run = { running:true, stage:'ask', log:[], error:null, cur:null };
+  NOM_RUNNING.set(id, run);
+  const log = function(t){ run.log.push({ t:new Date().toISOString(), text:String(t) }); };
+  const setStage = function(k){ run.stage = k; E.nomSetStage(id, k); };
+
+  (async function(){
+    try {
+      if (s0.phase === 'day') E.setPhase(id, 'nomination');
+      /* ---- 第一轮询问：谁要提名 ---- */
+      const passes = [0, 1];
+      for (let pi = 0; pi < passes.length; pi++) {
+        let anyNom = false;
+        /* 每一轮重新问一遍：上一轮的表态记录要清掉，否则第二轮永远问不到人 */
+        E.nomClearAsked(id);
+        const st = E.nomState(id);
+        const s = E.loadState(id);
+        /* 所有还有提名权、本轮还没表态过的存活玩家 */
+        const askList = [];
+        s.seats.forEach(function (x, i) {
+          if (!s.alive[i]) return;
+          if (st.nom.usedNom[i]) return;
+          askList.push(i);
+        });
+        if (!askList.length) break;
+        setStage('ask');
+        nomSay(id, pi === 0 ? '现在进入提名阶段。想发起提名的人请说出你要提名谁、理由是什么。' : '还有没有人要发起提名？');
+        log('询问第 ' + (pi+1) + ' 轮：' + askList.length + ' 位玩家需要表态');
+        for (const seat of askList) {
+          const sNow = E.loadState(id);
+          if (sNow.nom && sNow.nom.asked[seat]) continue;
+          if (seatType(sNow, seat) === 'player') {
+            /* 真人：等他点「提名」或「不提名」（前端调 nomPropose / nomSkip），超时才自动跳过 */
+            const t0 = Date.now();
+            for (;;) {
+              const stW = E.nomState(id);
+              if (!stW.ok || stW.nom.asked[seat]) break;
+              if (Date.now() - t0 > NOM_ASK_WAIT_MS) { E.nomMarkAsked(id, seat); break; }
+              await sleep(500);
+            }
+            continue;
+          }
+          const r = await askSeat(id, seat, 'propose', {});
+          E.nomMarkAsked(id, seat);
+          if (r.error) { log((seat+1) + ' 号提名表态失败：' + r.error); continue; }
+          const want = (r.obj && r.obj.nominate === true);
+          const tgt = Number((r.obj && r.obj.target) || 0);
+          const reason = String((r.obj && r.obj.reason) || '').trim();
+          if (!want || !(tgt >= 1 && tgt <= sNow.seats.length)) continue;
+          if (tgt - 1 === seat) { /* 可以提名自己 */ }
+          const pr = E.nomPropose(id, seat, tgt - 1, reason);
+          if (!pr.ok) { log((seat+1) + ' 号提名未生效：' + pr.error); continue; }
+          anyNom = true;
+          log((seat+1) + ' 号提名了 ' + tgt + ' 号：' + reason);
+          /* 提名理由由提名者自己公开说出来 */
+          if (reason) E.say(id, seat, reason, 'town');
+        }
+        /* ---- 处理队列（真人在提问阶段也可能自己提名，所以以队列是否有货为准）---- */
+        for (;;) {
+          const stQ = E.nomState(id);
+          if (!stQ.ok || !stQ.nom.queue.length) break;
+          const nx = E.nomNext(id);
+          if (!nx.ok) break;
+          anyNom = true;
+          const c = nx.cur;
+          run.cur = { from:c.from, target:c.target };
+          setStage('defense');
+          const sC = E.loadState(id);
+          if (c.reason) nomSay(id, (c.from+1) + ' 号 ' + sC.seats[c.from].name + ' 提名了 ' + (c.target+1) + ' 号 ' + sC.seats[c.target].name + '。');
+          /* 被提名发言 */
+          if (seatType(sC, c.target) === 'player') {
+            await waitStage(id, 'vote', NOM_ASK_WAIT_MS);
+          } else {
+            const d = await askSeat(id, c.target, 'defense', { from:c.from+1, fromName:sC.seats[c.from].name, reason:c.reason });
+            const txt = (d.parsed && d.parsed.say) ? String(d.parsed.say).trim() : '';
+            if (txt) { E.say(id, c.target, txt, 'town'); }
+            E.nomSpeech(id, 'defense', txt || '（没有为自己辩护）');
+          }
+          /* 投票：AI 逐个决定，真人用前端按钮 */
+          setStage('vote');
+          const sV = E.loadState(id);
+          const alive = sV.alive;
+          const aiSeats = [];
+          const humanSeats = [];
+          sV.seats.forEach(function (x, i) {
+            if (seatType(sV, i) === 'player') humanSeats.push(i); else aiSeats.push(i);
+          });
+          const outs = await Promise.all(aiSeats.map(function (i) {
+            return askSeat(id, i, 'vote', { target:c.target+1, targetName:sV.seats[c.target].name, reason:c.reason, dead:!alive[i] }).catch(function (e) { return { error:String(e && e.message || e) }; });
+          }));
+          aiSeats.forEach(function (i, k) {
+            const r = outs[k];
+            if (!r || r.error) return;
+            const hand = !!(r.obj && r.obj.hand === true);
+            E.nomHand(id, i, hand);
+            if (r.parsed && r.parsed.say && String(r.parsed.say).trim()) E.say(id, i, String(r.parsed.say).trim(), 'town');
+          });
+          if (humanSeats.length) {
+            /* 等真人点完举手（前端 nomHand），最多 NOM_ASK_WAIT_MS */
+            const t0 = Date.now();
+            for (;;) {
+              const sH = E.loadState(id);
+              const curH = sH.nom && sH.nom.cur;
+              if (!curH || sH.nom.stage !== 'vote') break;
+              const missing = humanSeats.filter(function (i) { return curH.hands[i] === undefined; });
+              if (!missing.length) break;
+              if (Date.now() - t0 > NOM_ASK_WAIT_MS) break;
+              await sleep(500);
+            }
+          }
+          /* 时钟轮转：一格一格锁定 */
+          E.nomClockBegin(id);
+          setStage('clock');
+          for (;;) {
+            const tk = E.nomTick(id);
+            if (!tk.ok) break;
+            if (tk.stage === 'result') break;
+            await sleep(NOM_TICK_MS);
+          }
+          setStage('result');
+          const rs = E.nomState(id);
+          const last = rs.ok && rs.nom.results.length ? rs.nom.results[rs.nom.results.length-1] : null;
+          if (last) log('投票结果：' + (last.target+1) + ' 号 ' + last.votes + '/' + last.aliveCount + ' 票，' + (last.passed ? '上处决台' : '未上处决台'));
+          E.nomClose(id);
+          run.cur = null;
+        }
+        if (!anyNom) break;
+      }
+      /* ---- 收尾：处决并入夜 ---- */
+      setStage('finish');
+      const fin = E.nomFinish(id);
+      if (fin.executed) {
+        log('处决 ' + (fin.target+1) + ' 号');
+      }
+      const sEnd = E.loadState(id);
+      if (sEnd.phase !== 'ended') {
+        const n = (sEnd.night || 1) + 1;
+        E.setPhase(id, 'night');
+        const s2 = E.loadState(id);
+        s2.night = n;
+        s2.nom = null;
+        E.saveState(id, s2);
+        nomSay(id, '提名阶段结束，天色暗了下来。所有人闭眼。');
+      }
+      run.cur = null;
+      setStage('done');
+    } catch (err) {
+      run.error = String((err && err.message) || err);
+    } finally {
+      run.running = false;
+    }
+  })();
+
+  return { ok:true, started:true };
+}
 /* ---------- 说书人逐条回应聊天 ----------
    公聊或私聊每来一条，都把内容交给说书人思考：它可以开口，也可以选择不开口；
    私聊一般都会回。回答直接以说书人的身份落库（private 只回给发信人，town 公开发言）。 */
@@ -1172,6 +1411,7 @@ async function drainStoryChat(id) {
 }
 
 module.exports = {
+  runNomination, nomStatus, buildNomPrompt,
   viewFor, viewForStoryteller, buildPrompt, buildStorytellerNightPrompt, buildStorytellerDayPrompt,
   parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
   setLlmCall, hasLlm, routeFor,

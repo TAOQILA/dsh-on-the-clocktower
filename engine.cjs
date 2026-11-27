@@ -557,8 +557,202 @@ function storyLog(id){
   rows.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
   return rows;
 }
+/* ==================== 提名与投票（按规则实现） ==================== */
+/* 每个白天：每名存活玩家各有 1 次提名权、1 次被提名权；死者有 1 张死亡票（复活则恢复不限票，再死再给 1 张）。
+   一次提名流程：提名理由 → 被提名发言 → 投票（举手）→ 时钟轮转（经过即锁定）→ 结算 → 上处决台。 */
+function nomNewDay(s){
+  s.nom = { stage:'idle', queue:[], cur:null, usedNom:{}, usedTarget:{}, onBlock:null, results:[], day:s.day||0, busy:false, lastTick:0, asked:{} };
+}
+function nomEnsure(id){
+  const s = loadState(id);
+  if (!s.nom || s.nom.day !== (s.day||0)) { nomNewDay(s); saveState(id, s); }
+  return s;
+}
+function nomState(id){
+  const s = nomEnsure(id);
+  return { ok:true, nom:s.nom, alive:s.alive, deadVoteUsed:s.deadVoteUsed||{}, seats:s.seats.map(function(x,i){ return {name:x.name, alive:!!s.alive[i]}; }) };
+}
+function nomCanNominate(s, seat){
+  if (!s.alive[seat]) return false;
+  return !(s.nom.usedNom[seat]);
+}
+function nomPropose(id, from, target, reason){
+  const s = nomEnsure(id);
+  if (!s.nom) nomNewDay(s);
+  from = Number(from); target = Number(target);
+  if (!(from >= 0 && from < s.seats.length)) return { ok:false, error:'提名者座位越界' };
+  if (!(target >= 0 && target < s.seats.length)) return { ok:false, error:'被提名者座位越界' };
+  if (!s.alive[from]) return { ok:false, error:'已死亡的玩家不能发起提名' };
+  if (s.nom.usedNom[from]) return { ok:false, error:'你今天已经提名过了' };
+  if (s.nom.usedTarget[target]) return { ok:false, error:'该玩家今天已经被提名过了' };
+  if (s.nom.cur) return { ok:false, error:'当前还有一项提名没有处理完' };
+  s.nom.usedNom[from] = true; s.nom.usedTarget[target] = true;
+  s.nom.asked[from] = true;
+  s.nom.queue.push({ from:from, target:target, reason:String(reason||''), t:new Date().toISOString() });
+  saveState(id, s);
+  say(id, 'storyteller', s.seats[from].name + ' 提名了 ' + s.seats[target].name + '。', 'town');
+  log(id, '说书人', (from+1)+' 号 '+s.seats[from].name+' 提名 '+(target+1)+' 号 '+s.seats[target].name);
+  return { ok:true, queue:s.nom.queue.length };
+}
+function nomNext(id){
+  const s = nomEnsure(id);
+  if (s.nom.cur) return { ok:true, cur:s.nom.cur };
+  if (!s.nom.queue.length) return { ok:false, error:'没有待处理的提名' };
+  const q = s.nom.queue.shift();
+  const n = s.seats.length;
+  const order = [];
+  for (let k = 1; k <= n; k++) order.push((q.from + k) % n);
+  s.nom.cur = { from:q.from, target:q.target, reason:String(q.reason||''), defense:'', hands:{}, order:order, ptr:-1, yes:[], no:[], passed:false, votes:0, startedAt:new Date().toISOString() };
+  s.nom.stage = 'reason';
+  saveState(id, s);
+  log(id, '说书人', '处理提名：'+(q.from+1)+' 号 提名 '+(q.target+1)+' 号', true);
+  return { ok:true, cur:s.nom.cur, stage:s.nom.stage };
+}
+function nomSpeech(id, kind, text){
+  const s = nomEnsure(id);
+  if (!s.nom.cur) return { ok:false, error:'当前没有提名' };
+  const k = (kind === 'defense') ? 'defense' : 'reason';
+  s.nom.cur[k] = String(text||'');
+  if (k === 'reason') { s.nom.stage = 'defense'; }
+  else { s.nom.stage = 'vote'; }
+  saveState(id, s);
+  return { ok:true, stage:s.nom.stage };
+}
+function nomHand(id, seat, yes){
+  const s = nomEnsure(id);
+  if (!s.nom.cur) return { ok:false, error:'当前没有提名' };
+  if (s.nom.stage !== 'vote') return { ok:false, error:'现在不在投票阶段' };
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  if (!s.alive[seat] && s.deadVoteUsed && s.deadVoteUsed[seat]) return { ok:false, error:'死者的投票标记已经用掉了' };
+  s.nom.cur.hands[seat] = !!yes;
+  saveState(id, s);
+  return { ok:true, hands:s.nom.cur.hands };
+}
+function nomClockBegin(id){
+  const s = nomEnsure(id);
+  if (!s.nom.cur) return { ok:false, error:'当前没有提名' };
+  s.nom.stage = 'clock'; s.nom.cur.ptr = -1; s.nom.lastTick = Date.now();
+  saveState(id, s);
+  return { ok:true, stage:'clock' };
+}
+function nomFinalizeSeat(s, seat){
+  const cur = s.nom.cur;
+  const want = !!cur.hands[seat];
+  const alive = !!s.alive[seat];
+  let counted = false;
+  if (want) {
+    if (alive) { counted = true; }
+    else if (!(s.deadVoteUsed && s.deadVoteUsed[seat])) { counted = true; if (!s.deadVoteUsed) s.deadVoteUsed = {}; s.deadVoteUsed[seat] = true; }
+  }
+  if (counted) cur.yes.push(seat); else cur.no.push(seat);
+  if (!cur.locked) cur.locked = [];
+  cur.locked.push({ seat:seat, hand:want, counted:counted });
+}
+function nomTick(id){
+  const s = nomEnsure(id);
+  if (!s.nom.cur || s.nom.stage !== 'clock') return { ok:false, error:'不在时钟阶段' };
+  const cur = s.nom.cur;
+  if (cur.ptr >= 0) nomFinalizeSeat(s, cur.order[cur.ptr]);
+  cur.ptr++;
+  if (cur.ptr >= cur.order.length) {
+    s.nom.stage = 'result';
+    saveState(id, s);
+    return nomResolve(id);
+  }
+  s.nom.lastTick = Date.now();
+  saveState(id, s);
+  return { ok:true, ptr:cur.ptr, seat:cur.order[cur.ptr], stage:'clock', yes:cur.yes.length };
+}
+function nomResolve(id){
+  const s = nomEnsure(id);
+  const cur = s.nom.cur;
+  if (!cur) return { ok:false, error:'当前没有提名' };
+  const aliveCount = s.seats.filter(function(x,i){ return s.alive[i]; }).length;
+  const votes = cur.yes.length;
+  const majority = (votes * 2 >= aliveCount);
+  const prev = s.nom.onBlock ? s.nom.onBlock.votes : 0;
+  let passed = false;
+  if (votes > prev) {
+    if (votes >= 1 && majority) { passed = true; s.nom.onBlock = { target:cur.target, votes:votes, day:s.day }; }
+    else { s.nom.onBlock = null; }
+  } else if (votes === prev && s.nom.onBlock) {
+    s.nom.onBlock = null;
+  }
+  cur.votes = votes; cur.passed = passed; cur.aliveCount = aliveCount;
+  s.nom.stage = 'result';
+  s.nom.results.push({ from:cur.from, target:cur.target, votes:votes, aliveCount:aliveCount, passed:passed });
+  saveState(id, s);
+  const tname = (cur.target+1)+' 号 '+s.seats[cur.target].name;
+  let txt = '投票结束：' + tname + ' 获得 ' + votes + ' 票（存活 ' + aliveCount + ' 人，需 ' + Math.ceil(aliveCount/2) + ' 票）。';
+  txt += (s.nom.onBlock && s.nom.onBlock.target === cur.target) ? '当前在处决台上。' : '没有上处决台。';
+  say(id, 'storyteller', txt, 'town');
+  log(id, '说书人', txt, true);
+  return { ok:true, stage:'result', votes:votes, passed:passed, onBlock:s.nom.onBlock };
+}
+/* 结束当前这一项提名：清空 cur；队列里还有就接着处理下一项 */
+function nomClose(id){
+  const s = nomEnsure(id);
+  if (s.nom.cur) { s.nom.cur = null; s.nom.stage = 'idle'; saveState(id, s); }
+  if (s.nom.queue.length) return nomNext(id);
+  return { ok:true, cleared:true };
+}
+/* 提名阶段收尾：处决当天的最高票（在处决台上的人），没有就不处决 */
+function nomFinish(id){
+  const s = nomEnsure(id);
+  s.nom.cur = null;
+  s.nom.stage = 'done';
+  const ob = s.nom.onBlock;
+  s.nom.onBlock = null;
+  saveState(id, s);
+  if (ob) {
+    const r = execute(id, ob.target);
+    return { ok:true, executed:true, target:ob.target, win:(r && r.win) || null };
+  }
+  say(id, 'storyteller', '今天没有人被处决。', 'town');
+  return { ok:true, executed:false };
+}
+function nomClearAsked(id){
+  const s = nomEnsure(id);
+  s.nom.asked = {};
+  saveState(id, s);
+  return { ok:true };
+}
+function nomSkip(id, seat){
+  const s = nomEnsure(id);
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
+  s.nom.asked[seat] = true;
+  saveState(id, s);
+  return { ok:true };
+}
+function nomSetStage(id, stage){
+  const s = nomEnsure(id);
+  s.nom.stage = String(stage || 'idle');
+  saveState(id, s);
+  return { ok:true, stage:s.nom.stage };
+}
+function nomSetBusy(id, busy){
+  const s = nomEnsure(id);
+  s.nom.busy = !!busy;
+  saveState(id, s);
+  return { ok:true };
+}
+function nomMarkAsked(id, seat){
+  const s = nomEnsure(id);
+  s.nom.asked[seat] = true;
+  saveState(id, s);
+  return { ok:true };
+}
+function nomReset(id){
+  const s = nomEnsure(id);
+  nomNewDay(s);
+  saveState(id, s);
+  return { ok:true };
+}
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
   dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
-  evilInfoFor, bluffRoles, dealEvilInfo };
+  evilInfoFor, bluffRoles, dealEvilInfo,
+  nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked };

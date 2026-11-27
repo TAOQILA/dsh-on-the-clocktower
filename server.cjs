@@ -149,6 +149,15 @@ function buildApi(opts){
   openVote: (b) => E.openVote(b.id, b.target),
   castVote: (b) => E.castVote(b.id, b.seat, b.yes !== false),
   resolveVote: (b) => E.resolveVote(b.id),
+  /* 提名与投票 */
+  nomination: (b) => A.runNomination(b.id, b),
+  nomStatus: (b) => A.nomStatus(b.id),
+  nomState: (b) => E.nomState(b.id),
+  nomPropose: (b) => E.nomPropose(b.id, b.from, b.target, b.reason),
+  nomSpeech: (b) => E.nomSpeech(b.id, b.kind, b.text),
+  nomHand: (b) => E.nomHand(b.id, b.seat, b.yes !== false),
+  nomSkip: (b) => E.nomSkip(b.id, b.seat),
+  nomFinish: (b) => E.nomFinish(b.id),
   storyChat: (b) => A.storyReply(b.id, b.msg),
   storyStatus: (b) => A.storyStatus(b.id),
   agentSpeak: async (b) => {
