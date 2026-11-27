@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.1';
+var VERSION = '0.15.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -24,7 +24,7 @@ var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
   storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
-  nomCfgMin:20, nomCfgSoftMax:80, nomCfgHardMax:150, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
+  nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -62,7 +62,7 @@ function savePrefs(){
        说书人模型、「你」放在哪、自动讨论开关。这样无论刷新、关页面还是重启 DSH，
        回来都还是上一次的设置。 */
     localStorage.setItem(PREF_KEY, JSON.stringify({
-      v: 2,
+      v: 3,
       script: S.script ? S.script.name : '',
       storyName: S.storyName || '说书人',
       storyProvider: S.storyProvider || '',
@@ -113,10 +113,13 @@ function loadPrefs(){
     S.storyProvider = o.storyProvider || '';
     S.storyModel = o.storyModel || '';
     S.roleMode = (o.roleMode === 'storyteller') ? 'storyteller' : 'program';
+    /* v3 起提名时机默认值改为 15/45/80；老 prefs 里存的 20/80/150 不再沿用 */
+    if (Number(o.v) >= 3) {
     if (isFinite(Number(o.nomCfgMin))) S.nomCfgMin = Number(o.nomCfgMin);
     if (isFinite(Number(o.nomCfgSoftMax))) S.nomCfgSoftMax = Number(o.nomCfgSoftMax);
     if (isFinite(Number(o.nomCfgHardMax))) S.nomCfgHardMax = Number(o.nomCfgHardMax);
     if (typeof o.nomCfgUnanimous === 'boolean') S.nomCfgUnanimous = o.nomCfgUnanimous;
+    }
     S.hideDm = o.hideDm === true;
     if (Array.isArray(o.seats) && o.seats.length >= 5 && o.seats.length <= 30) {
       S.seats = o.seats.map(function(x,i){
@@ -819,7 +822,7 @@ async function startGame(){
     return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
   });
   var cfg = { script:S.script.name, seats:seatsNew, aiStyle:(S.aiStyle||'mild_fun'), roleMode:(S.roleMode||'program'),
-    nomCfg:{ min:Number(S.nomCfgMin)||20, softMax:Number(S.nomCfgSoftMax)||80, hardMax:Number(S.nomCfgHardMax)||150, unanimous:S.nomCfgUnanimous!==false },
+    nomCfg:{ min:Number(S.nomCfgMin)||15, softMax:Number(S.nomCfgSoftMax)||45, hardMax:Number(S.nomCfgHardMax)||80, unanimous:S.nomCfgUnanimous!==false },
     storyteller:(zone==='story')
       ? {type:'player',name:'我'}
       : {type:'agent',name:(S.storyName||'说书人'),provider:S.storyProvider||'',model:S.storyModel||''} };
@@ -1321,7 +1324,7 @@ function modelStyleSelect(){
    少于 min 不主动进；min~softMax 由说书人裁量；到 softMax 通常应进；到 hardMax 必须进；
    全员公开表示同意可提前。四个参数都可在设置里改，并随建局写入 state.nomCfg。 */
 function nomCfgPanel(){
-  var mn = Number(S.nomCfgMin) || 20, sm = Number(S.nomCfgSoftMax) || 80, hm = Number(S.nomCfgHardMax) || 150;
+  var mn = Number(S.nomCfgMin) || 15, sm = Number(S.nomCfgSoftMax) || 45, hm = Number(S.nomCfgHardMax) || 80;
   var un = S.nomCfgUnanimous !== false;
   return '<div class="setrow"><div>最早可以进入提名（条公共消息）</div>'+
       '<input type="number" min="0" max="500" value="'+mn+'" onchange="setNomCfgUI(\'nomCfgMin\',this.value)">'+

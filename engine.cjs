@@ -46,7 +46,7 @@ function createGame(cfg){
     roleMode: cfg.roleMode || 'program',
     roles: {}, apparentRoles: {}, alignment: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
     shields: {}, abilityUsed: {}, granted: {}, winBlocks: [], extra: {},
-    nomCfg: Object.assign({ min: 20, softMax: 80, hardMax: 150, unanimous: true }, cfg.nomCfg || {}),
+    nomCfg: Object.assign({ min: 15, softMax: 45, hardMax: 80, unanimous: true }, cfg.nomCfg || {}),
     log: [], readAcks: []
   };
   cfg.seats.forEach((s,i)=>{
@@ -1322,7 +1322,7 @@ function applyOps(id, ops){
    公共消息数 < min 不进入，min~softMax 之间由说书人裁量，softMax 之后应当进入，
    hardMax 到达必须进入（硬性）；若所有存活玩家都表示同意，可以提前进入。
    这三个数值与「全员同意可提前」都可在设置里改。 */
-const NOM_CFG_DEFAULT = { min: 20, softMax: 80, hardMax: 150, unanimous: true };
+const NOM_CFG_DEFAULT = { min: 15, softMax: 45, hardMax: 80, unanimous: true };
 const NOM_AGREE_RE = /(进入|开始|发起|进行|走|开).{0,6}提名|提名(阶段|吧|了|一下)|可以提名|同意提名|赶紧提名|该提名/;
 
 function nomCfgOf(s){

@@ -550,7 +550,7 @@ function buildStorytellerDayPrompt(id) {
   /* 提名时机闸门：由说书人结合公共消息条数自行判断何时进入提名阶段 */
   try {
     const gate = E.nomGate(id);
-    const cfg = gate.cfg || { min: 20, softMax: 80, hardMax: 150, unanimous: true };
+    const cfg = gate.cfg || { min: 15, softMax: 45, hardMax: 80, unanimous: true };
     lines.push('');
     lines.push('【提名时机 · 由你判断】今天公聊里已有 ' + gate.count + ' 条公开消息（存活 ' + gate.alive + ' 人）。');
     lines.push('· 少于 ' + cfg.min + ' 条：除非有人明确要求，否则不要进入提名阶段。');
