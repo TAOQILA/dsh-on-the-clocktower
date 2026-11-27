@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.1';
+var VERSION = '0.13.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1078,7 +1078,7 @@ var AI_STYLE_LIST = [
 function modelStyleSelect(){
   var cur = S.aiStyle || 'mild_fun';
   var opts = AI_STYLE_LIST.map(function(p){
-    return '<option value="'+p[0]+"'+(p[0]===cur?' selected':'')+'>'+p[1]+'</option>';
+    return '<option value="'+p[0]+'"'+(p[0]===cur?' selected':'')+'>'+p[1]+'</option>';
   }).join('');
   var tail = (S.game && S.game.id)
     ? '<div class="muted">本局已开始：改动会立刻对本局所有 AI 生效。</div>'
