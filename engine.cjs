@@ -378,10 +378,18 @@ function dealRoles(id){
   const n = (s.seats || []).length;
   if (!n) return { ok:false, error:'没有座位' };
   const comp = compositionFor(n);          /* [镇民, 外来者, 爪牙, 恶魔] */
-  /* 先抽爪牙与恶魔：它们的 [..] 括号会反过来改外来者数量 */
-  const minions = shuffle(pool['爪牙']).slice(0, comp[2]);
-  const demons  = shuffle(pool['恶魔']).slice(0, comp[3]);
-  /* 带 [..] 的角色对配比做机械修正 */
+  /* 先抽恶魔：恶魔的 [..] 括号可能要求额外爪牙，会影响下面抽几个爪牙 */
+  const demons = shuffle(pool['恶魔']).slice(0, comp[3]);
+  let bonusMinion = 0;
+  demons.forEach(function(name){
+    const r = roleInfoByName(name);
+    const ab = (r && r.ability) || '';
+    const m = ab.match(/\[\s*\+\s*(\d+)\s*爪牙/);
+    if (m) bonusMinion += Number(m[1]);
+  });
+  /* 再抽爪牙：数量 = 基础配比 + 恶魔/爪牙自身带来的额外爪牙 */
+  const minions = shuffle(pool['爪牙']).slice(0, comp[2] + bonusMinion);
+  /* 带 [..] 的角色对配比做机械修正（外来者增减） */
   let bonusOutsider = 0;
   minions.concat(demons).forEach(function(name){
     const r = roleInfoByName(name);
@@ -390,8 +398,6 @@ function dealRoles(id){
     if (m) bonusOutsider += Number(m[1]);
     m = ab.match(/\[\s*-\s*(\d+)\s*外来者/);
     if (m) bonusOutsider -= Number(m[1]);
-    m = ab.match(/\[\s*\+\s*(\d+)\s*爪牙/);
-    if (m) { /* 额外爪牙：从爪牙池继续补抽，体现在下面 */ }
   });
   let [nt, no, nm, nd] = comp;
   no = Math.max(0, no + bonusOutsider);
