@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.22';
+var VERSION = '0.15.23';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -558,7 +558,7 @@ function bubHtml(m){
   var fs = cached ? (' style="font-size:'+cached+'px"') : '';
   return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'"'+fs+' data-bkey="'+esc(bkey)+'" data-age="'+age.toFixed(1)+'">'
     + (isDm?('<span class="dmtag">私聊</span>'+toTxt):'')
-    + colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), seatLookup(S.game))), senderColor(S.game, m.from)) + '</div>';
+    + hlRoleWords(colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), seatLookup(S.game))), senderColor(S.game, m.from))) + '</div>';
 }
 function stBubbles(){
   if (S.showBubbles === false) return '';
@@ -1856,7 +1856,7 @@ function chatMsgsHtml(g, channel, peer){
       }).join('、') + '</span>';
     }
     return '<div class="msg ' + cls + '"><span class="who">' + who + '</span>' + tag + toTxt
-      + '<div class="mtext">' + colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), lk)), senderColor(g, m.from)) + '</div></div>';
+      + '<div class="mtext">' + hlRoleWords(colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), lk)), senderColor(g, m.from))) + '</div></div>';
   }).join('');
   return h || '<div class="muted">' + (channel === 'private' ? '还没有私聊。' : '暂无消息') + '</div>';
 }
@@ -2193,6 +2193,43 @@ function cnToInt(txt){
 }
 /* 把「3 号 / 三号 / 十二号 / 2号」这类座位引用染成该座位的颜色。
    中文数字与阿拉伯数字同等对待，避免「三号」在聊天里不变色而「3 号」变色。 */
+function roleWordList(){
+  var a = (S.script && S.script.roles) || [];
+  var out = [];
+  for (var i = 0; i < a.length; i++){
+    var n = String(a[i] || "").trim();
+    if (n.length >= 2 && out.indexOf(n) < 0) out.push(n);
+  }
+  /* 长的排前面，避免「间谍」把「间谍大师」切碎 */
+  out.sort(function(x, y){ return y.length - x.length; });
+  return out;
+}
+var ROLEWORD_KEY = "", ROLEWORD_RE = null;
+function hlRoleWords(html){
+  var list = roleWordList();
+  var key = list.join("|");
+  if (key !== ROLEWORD_KEY){
+    ROLEWORD_KEY = key;
+    ROLEWORD_RE = list.length ? new RegExp("(" + list.map(function(n){ return n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("|") + ")", "g") : null;
+  }
+  if (!ROLEWORD_RE) return html;
+  var parts = String(html == null ? "" : html).split(/(<[^>]*>)/g);
+  for (var i = 0; i < parts.length; i++){
+    if (parts[i].charAt(0) === "<") continue;
+    parts[i] = parts[i].replace(ROLEWORD_RE, function(all, name){
+      return "<span class=\"roleword\" onclick=\"openWikiRole('" + name.replace(/'/g, "\\'") + "')\">" + name + "</span>";
+    });
+  }
+  return parts.join("");
+}
+/* 点聊天里的角色名：跳到知识库并打开该条目，同时把左侧栏展开 */
+function openWikiRole(name){
+  if (!name) return;
+  S.tab = "wiki";
+  S.hideSide = false;
+  try { savePrefs(); } catch(e) {}
+  showWikiPage(String(name));
+}
 function hlSeatNums(html){
   var g = S.game || null;
   var total = (g && g.seats && g.seats.length) || (S.seats && S.seats.length) || 0;

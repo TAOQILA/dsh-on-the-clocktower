@@ -467,3 +467,8 @@ body.night .readyflag{color:#9c8fe0}
 
 .dmtyping{min-height:16px;font-size:12px;color:var(--muted,#9b93a8);padding:2px 12px 0;font-style:italic}
 body.night .dmtyping{color:#a9a0c4}
+
+/* 聊天气泡/消息里的角色名：下划线 + 可点击跳知识库 */
+.roleword{text-decoration:underline;text-decoration-color:rgba(217,182,106,.85);text-underline-offset:3px;text-decoration-thickness:1.5px;cursor:pointer;transition:color .15s}
+.roleword:hover{color:var(--gold)}
+body.night .roleword{text-decoration-color:rgba(178,203,255,.85)}
