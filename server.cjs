@@ -153,6 +153,19 @@ function buildApi(opts){
       } catch (e) {}
     }
     const r = savedMsg || E.say(b.id, b.seat, b.text, b.channel, b.to);
+    /* 杂耍艺人的公开猜测：程序解析并落库，说书人只负责回一句确认（不能只靠模型「记下」） */
+    if (r && r.ok && r.message && (!r.message.channel || r.message.channel === 'town') && r.message.from !== 'storyteller') {
+      try {
+        const jg = E.jugglerFromChat(b.id, Number(r.message.from), r.message.text);
+        if (jg && jg.handled) {
+          const _ack = jg.ok
+            ? '已记录你的公开猜测：' + jg.pairs.map(function (p) { return (p.target + 1) + ' 号 ' + p.guess; }).join('、') + '。今晚会告诉你命中几个。'
+            : jg.error;
+          E.say(b.id, 'storyteller', _ack, 'town');
+          return r;
+        }
+      } catch (e) {}
+    }
     /* 公聊里声明「我准备好进入提名了」：写进准备名单并公开显示在圆桌上，
        再由说书人结合天平判断是否真的进入提名阶段（m11961）。 */
     if (r && r.ok && r.message && r.message.channel === 'town' && r.message.from !== 'storyteller' && r.message.from !== 'admin') {

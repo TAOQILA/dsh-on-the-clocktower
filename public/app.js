@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.21';
+var VERSION = '0.15.22';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -335,6 +335,7 @@ function render(force){
   var g = S.game, seats = g?g.seats:S.seats;
   applyPhaseTheme();
   /* 字号：整个界面按比例缩放（Chromium/Edge 支持 zoom），设置里可调 */
+  var cur = g?g.phase:'setup';
   var appEl = document.getElementById('app');
   if (appEl) appEl.style.zoom = String(S.fontScale || 1);
   applyBg();

@@ -2057,6 +2057,20 @@ function nCircDist(n, a, b){
   return Math.min(d, n - d);
 }
 Object.assign(NIGHT_FIXED, {
+  /* 杂耍艺人：白天公开猜过谁是什么角色，今晚结算命中几个（首个白天最多五次） */
+  "杂耍艺人": function(s, seat){
+    const j = (s.extra && s.extra.juggler) || null;
+    if (!j || Number(j.seat) !== Number(seat)) return { text: "你这一局没有做出有效的公开猜测，所以今晚没有获得信息。" };
+    if (j.counted || Number(s.night || 0) !== Number(j.night || 0) + 1) return { text: "你这次的公开猜测已经结算过了，今晚没有新的信息。" };
+    let hit = 0;
+    (j.pairs || []).forEach(function(p){ if (nRoleAt(s, p.target) === p.guess) hit++; });
+    /* 只能结算一次：写回状态，否则后面每夜都会再报一遍 */
+    try {
+      const s2 = loadState(NIGHT_CUR_ID);
+      if (s2.extra && s2.extra.juggler) { s2.extra.juggler.counted = true; saveState(NIGHT_CUR_ID, s2); }
+    } catch (e) {}
+    return { text: "你的公开猜测命中 " + hit + " 个（你一共猜了 " + (j.pairs || []).length + " 个）。" };
+  },
   "祖母": function(s, seat){
     const good = [];
     (s.seats || []).forEach(function(x, i){ if (s.alive[i] && i !== seat && !isEvilSeat(s, i)) good.push(i); });
@@ -2319,7 +2333,7 @@ const NIGHT_SKIP = {
 };
 Object.assign(NIGHT_KIND, {
   "祖母": "info", "神谕者": "info", "数学家": "info", "教父": "info",
-  "钟表匠": "info", "城镇公告员": "info", "卖花女孩": "info", "贤者": "info",
+  "钟表匠": "info", "城镇公告员": "info", "卖花女孩": "info", "贤者": "info", "杂耍艺人": "info",
   "女巫": "choice", "刺客": "choice", "驱魔人": "choice", "魔鬼代言人": "choice",
   "舞蛇人": "choice", "水手": "choice", "旅店老板": "choice", "赌徒": "choice",
   "教授": "choice", "沙巴洛斯": "choice", "珀": "choice", "涡流": "choice",
@@ -2458,6 +2472,46 @@ function nightExec(id){
 }
 /* 玩家回答了一个等待中的选择 */
 const NIGHT_NEED = { 女裁缝: 2, 旅店老板: 2, 沙巴洛斯: 2, 侍女: 2, 占卜师: 2 };
+/* 杂耍艺人的白天公开猜测：由程序解析并落库（每局一次，首个白天）。
+   以前没有任何存储，说书人只会在聊天里应一句「记下了」，夜里自然什么也算不出来。 */
+function jugglerFromChat(id, seat, text){
+  const s = loadState(id);
+  const idx = Number(seat);
+  if (!(idx >= 0) || !(s.seats || [])[idx]) return { ok: false, handled: false };
+  if (roleOfSeat(s, idx) !== "杂耍艺人") return { ok: false, handled: false };
+  const t = String(text || "");
+  if (!/猜测|猜/.test(t)) return { ok: false, handled: false };
+  if (s.extra && s.extra.juggler) return { ok: false, handled: true, error: "你本局的公开猜测已经用过了。" };
+  if (Number(s.day || 0) !== 1) return { ok: false, handled: true, error: "杂耍艺人只能在首个白天公开猜测。" };
+  const names = [];
+  (s.seats || []).forEach(function(x, i){ const nm = String((x && x.name) || ""); if (nm.length >= 1) names.push({ i: i, n: nm }); });
+  names.sort(function(a, b){ return b.n.length - a.n.length; });
+  const roleNames = roleInfoAll().map(function(r){ return String(r.name || ""); }).filter(Boolean);
+  roleNames.sort(function(a, b){ return b.length - a.length; });
+  const pairs = [];
+  String(t).split(/[，,、;；\n]+/).forEach(function(seg){
+    let rest = String(seg).replace(/@/g, " ");
+    let target = -1;
+    const mNum = /(\d{1,2})\s*号/.exec(rest);
+    if (mNum) { target = Number(mNum[1]) - 1; rest = rest.replace(mNum[0], " "); }
+    if (target < 0) {
+      for (let k = 0; k < names.length; k++) { if (rest.indexOf(names[k].n) >= 0) { target = names[k].i; rest = rest.replace(names[k].n, " "); break; } }
+    }
+    if (target < 0 || target >= (s.seats || []).length) return;
+    let guess = "";
+    for (let k = 0; k < roleNames.length; k++) { if (rest.indexOf(roleNames[k]) >= 0) { guess = roleNames[k]; break; } }
+    if (!guess) return;
+    if (pairs.some(function(p){ return p.target === target; })) return;
+    if (pairs.length >= 5) return;
+    pairs.push({ target: target, guess: guess });
+  });
+  if (!pairs.length) return { ok: false, handled: true, error: "没看出你的猜测格式。请这样写：@玩家名 角色名，最多五个。" };
+  s.extra = s.extra || {};
+  s.extra.juggler = { seat: idx, day: Number(s.day || 0), night: Number(s.night || 0), pairs: pairs, counted: false };
+  saveState(id, s);
+  log(id, "系统", "杂耍艺人（" + nSeatLabel(s, idx) + "）的公开猜测已记录：" + pairs.map(function(p){ return nSeatLabel(s, p.target) + "→" + p.guess; }).join("、"), true);
+  return { ok: true, handled: true, pairs: pairs, count: pairs.length };
+}
 function nightAnswer(id, seat, text){
   const s=nightEnsure(id);
   const step=(s.nightRun.steps||[]).filter(function(x){ return x.status==="await" && Number(x.seat)===Number(seat); })[0];
@@ -2575,7 +2629,7 @@ function nomReadyFromChat(id, seat, text){
   return { handled:true, ready:r };
 }
 
-module.exports = { nomSetReady, nomReadyState, nomReadyAll, nomReadyEnsure, nomReadyFromChat, nightExec, nightAnswer, nightMarkDone, nightProgress, nightBuildRun, nightEnsure, nightPending, nightParseSeats, NIGHT_KIND, createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
+module.exports = { jugglerFromChat, nomSetReady, nomReadyState, nomReadyAll, nomReadyEnsure, nomReadyFromChat, nightExec, nightAnswer, nightMarkDone, nightProgress, nightBuildRun, nightEnsure, nightPending, nightParseSeats, NIGHT_KIND, createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
   agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
   dealRoles, scriptData, compositionFor, setRoleMode, adminSay,
