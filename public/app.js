@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.13';
+var VERSION = '0.15.14';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -2132,6 +2132,22 @@ function seatBadge(i, name){
 }
 /* 把正文里的「3 号」「3号」「3 號」染成该座位的颜色。
    只在标签之外替换，避免改到 style="..." / class="..." 里的内容。 */
+/* 中文数字 → 阿拉伯数字：支持 一~二十 及「二十三」这类组合（最多到 99） */
+var CN_NUM = { '一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 };
+function cnToInt(txt){
+  var t = String(txt||'');
+  if (!t) return NaN;
+  if (t === '十') return 10;
+  if (t.length === 1) return CN_NUM[t] || NaN;
+  var tenIdx = t.indexOf('十');
+  if (tenIdx < 0) return NaN;
+  var hi = tenIdx === 0 ? 1 : (CN_NUM[t.charAt(0)] || 0);
+  var lo = (tenIdx === t.length - 1) ? 0 : (CN_NUM[t.charAt(tenIdx + 1)] || 0);
+  if (!hi) return NaN;
+  return hi * 10 + lo;
+}
+/* 把「3 号 / 三号 / 十二号 / 2号」这类座位引用染成该座位的颜色。
+   中文数字与阿拉伯数字同等对待，避免「三号」在聊天里不变色而「3 号」变色。 */
 function hlSeatNums(html){
   var g = S.game || null;
   var total = (g && g.seats && g.seats.length) || (S.seats && S.seats.length) || 0;
@@ -2139,8 +2155,9 @@ function hlSeatNums(html){
   var parts = String(html == null ? '' : html).split(/(<[^>]*>)/g);
   for (var i = 0; i < parts.length; i++){
     if (parts[i].charAt(0) === '<') continue;
-    parts[i] = parts[i].replace(/(\d{1,2})(\s*)(号|號)/g, function(all, num, sp, hao){
-      var idx = Number(num) - 1;
+    parts[i] = parts[i].replace(/([0-9]{1,2}|[一二两三四五六七八九十]{1,3})(\s*)(号|號)/g, function(all, num, sp, hao){
+      var n = /^[0-9]+$/.test(num) ? Number(num) : cnToInt(num);
+      var idx = n - 1;
       if (!isFinite(idx) || idx < 0 || idx >= total) return all;
       return '<span class="seatref" style="color:' + seatColor(idx) + '">' + num + sp + hao + '</span>';
     });
