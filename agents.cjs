@@ -267,14 +267,21 @@ const RULES = [
   '说书人在夜里私聊询问你的问题（例如让你选择谁）必须如实回答，不能沉默、不能回避；这是你的角色义务。',
 ].join('\n');
 
+function whoLabel(who, seats) {
+  if (who === 'storyteller') return '说书人';
+  if (who === 'admin') return '管理员';
+  if (seats && seats[who]) return seats[who].name;
+  const n = Number(who);
+  return isNaN(n) ? String(who) : ((n + 1) + ' 号');
+}
 function renderMessages(msgs, seats) {
   const list = msgs || [];
   if (!list.length) return '（暂无消息）';
   return list.map(function (m) {
-    const from = seats && seats[m.from] ? seats[m.from].name : ((Number(m.from)+1) + ' 号');
+    const from = whoLabel(m.from, seats);
     if (m.channel === 'private') {
       const to = (m.to || []).map(function (x) {
-        return seats && seats[x] ? seats[x].name : ((Number(x)+1) + ' 号');
+        return whoLabel(x, seats);
       }).join('、');
       return '[私聊] ' + from + ' → ' + to + '：' + m.text;
     }
@@ -370,6 +377,29 @@ function buildPrompt(id, seat, replyTo, mode) {
   return { prompt: lines.join('\n'), view: v };
 }
 
+/* ---------- 夜间行动顺序：从 data/nightorder.json 取标准顺序，按本局实际角色裁剪 ----------
+   说书人必须按这个顺序逐个处理角色，不能跳着来、也不能一次把所有人的信息混在一起发。 */
+let NIGHT_ORDER_CACHE = null;
+function nightOrderData(){
+  if (NIGHT_ORDER_CACHE) return NIGHT_ORDER_CACHE;
+  try {
+    const p = path.join(ROOT, 'data', 'nightorder.json');
+    NIGHT_ORDER_CACHE = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) { NIGHT_ORDER_CACHE = { first: [], other: [] }; }
+  return NIGHT_ORDER_CACHE;
+}
+function nightOrderFor(id){
+  const s = E.loadState(id);
+  const d = nightOrderData();
+  const seq = (Number(s.night || 1) <= 1 ? d.first : d.other) || [];
+  const present = {};
+  Object.keys(s.roles || {}).forEach(function (k) { present[String(s.roles[k] || '').trim()] = true; });
+  const out = [];
+  seq.forEach(function (name) {
+    if (present[name] && out.indexOf(name) < 0) out.push(name);
+  });
+  return out;
+}
 function buildStorytellerNightPrompt(id) {
   const v = viewForStoryteller(id);
   const lines = [];
@@ -412,10 +442,17 @@ function buildStorytellerNightPrompt(id) {
   } else {
     lines.push('【最高优先级 · 必须先做】本局角色表是空的（全部显示「未分配」）时，你这一轮的第一件事是在 info 里给每位存活座位写下「你的角色是【角色名】」，把所有人的角色分配好；这是玩家拿到自己身份的唯一途径。不能跳过。');
   }
-  lines.push('1. 按标准夜间唤醒顺序依次处理本局存在的角色（先爪牙获取信息，再特定角色，最后恶魔行动）。');
-  lines.push('2. 逐个决定该角色获得什么信息；如果某个能力需要该玩家自己选目标，先用 info 里对该座位发一条「请告诉我你想选择谁」的私聊，本轮先不结算这个角色，等 ta 回复后再结算。');
-  lines.push('3. 把需要私下告知的内容写出来：给每个今夜真正获得信息的角色发一条 info（写明他看到了什么）。角色的已由程序发好，不需要重复发角色名；这一夜没有任何角色获得信息时，info 可以是空数组。');
-  lines.push('4. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等），并按天平系统决定这次的裁量往哪边偏。');
+  const orderNow = nightOrderFor(id);
+  lines.push('【本夜行动顺序 · 必须严格按这个顺序，一个角色一个角色地处理】');
+  lines.push(orderNow.length ? orderNow.map(function (n, i) { return (i + 1) + '. ' + n; }).join('　') : '（本局没有需要夜间行动的角色）');
+  lines.push('处理方式（一次只处理一个角色，不要一口气把所有人的信息全发出来）：');
+  lines.push('1. 从上面顺序表里找出**第一个还没有结算**的角色。判断依据：看下面「已经发过的信息」里，有没有针对这个角色持有者的信息；已经发过并且不需要玩家再选择的，就算结算过了，直接看下一个。');
+  lines.push('2. 这一轮只处理这一个角色：需要给信息就发一条 info；需要该玩家自己选目标，就先发一条「请告诉我你想选择谁」的私聊提问，然后**立刻停下**（nextPhase 留空），等 ta 回复后再结算，再进下一个角色。');
+  lines.push('3. 顺序表上所有角色都结算完，才写 nextPhase="day"。绝不允许跳过顺序、也不允许把多个角色的信息塞进一条消息里。');
+  lines.push('【硬性要求】你打算「问某个玩家」这件事，必须真的写进 info 数组，不能在 think 里想一想就算了。只要 think 里出现「我先问」「等 ta 回复」之类的话，info 就必须至少有一条对应的提问；否则这一轮等于什么都没发生，主持会判定为空转。');
+  lines.push('4. 把需要私下告知的内容写出来：给每个今夜真正获得信息的角色发一条 info（写明他看到了什么）。角色已由程序发好，不需要重复发角色名；这一夜没有任何角色获得信息时，info 可以是空数组。');
+  lines.push('5. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等），并按天平系统决定这次的裁量往哪边偏。');
+  lines.push('【不许空转】info 为空、markers 为空、deaths 为空、nextPhase 也为空 —— 这种「什么都没做」的回包是不允许的。你至少要做成一件：给出信息、提出问题、裁定死亡/状态、或推进到白天。');
   lines.push('');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
   lines.push('{"think":"你的裁判思路（不公开）","say":"你要对全场公开说的话，没有就空字符串",');
@@ -846,13 +883,20 @@ async function runStoryteller(id, opts) {
          并提示它接着上一轮往下做（结算已答的选择、再问未答的、不重复播报）。
          SAFETY_CAP 只是极高的防死循环安全阀，正常对局远达不到。 */
       const ST_SAFETY_CAP = 24;
-      let out = null, stRound = 0, stLastN = msgN(), askedSeats = [];
+      /* 等玩家回答说书人提问的最长时间：说书人必须先问、玩家答完才能结算 */
+      const WAIT_ANSWER_MS = 45000;
+      let out = null, stRound = 0, stLastN = msgN(), askedSeats = [], stallN = 0, sayFirst = '', askDriven = false;
+      /* 逐轮累积的落库结果：每一轮都要立刻生效，不能等循环结束 */
+      const applied = { info: 0, markers: 0, deaths: 0, phase: null, vote: null, win: null };
       for (;;) {
         stRound++;
         const cur = isNight ? buildStorytellerNightPrompt(id) : buildStorytellerDayPrompt(id);
         let stPrompt = cur.prompt;
         if (stRound > 1) {
           stPrompt += '\n\n【继续上一轮未完成的裁定】你上一轮已经说过话、也可能给玩家下过信息；广场上随后出现了玩家回答你的提问（见上方对话）。请接着往下做：①先把已回答的选择结算成 info（写明角色与结算结果）；②还没回答的角色再私聊问一次；③这一轮 say 留空，不要重复公开播报；④不要重复问已经答过的问题；⑤只有本阶段所有需玩家选择的角色都结算完才写 nextPhase=day，否则留空。';
+        }
+        if (stallN > 0) {
+          stPrompt += '\n\n【必须推进 · 上一轮没有任何实际动作】你上一轮既没有给任何人 info，也没有标记、死亡或推进阶段，等于什么都没做。这一轮必须至少完成其中一件：①在 info 里逐个写下今夜的私聊内容（哪怕只是「你今晚没有获得信息」也要写，不能留空数组）；②需要玩家选目标就立刻在 info 里向该座位提问；③本夜确实全部结算完毕，就写 nextPhase="day"。不允许再空转一轮。';
         }
         let o;
         try {
@@ -873,79 +917,87 @@ async function runStoryteller(id, opts) {
         /* 每一轮的完整思考都立刻落库，绝不让说书人的思考被截断或吞掉 */
         let rp = null;
         try { rp = parseReply(out.text); if (rp && rp.think) E.think(id, 'storyteller', rp.think); } catch (e2) {}
-        if (rp && Array.isArray(rp.info)) {
+        const pre = { info: applied.info, markers: applied.markers, deaths: applied.deaths, phase: applied.phase };
+        if (stRound === 1 && rp && rp.say) sayFirst = String(rp.say);
+        /* 每一轮的结果必须立刻落库：否则玩家在广场上根本看不到说书人的提问，也就永远不会回答 */
+        if (rp && rp.say && !(stRound > 1 && sayFirst && String(rp.say) === sayFirst)) {
+          E.say(id, 'storyteller', rp.say, 'town');
+        }
+        let newlyAsked = [];
+        if (rp && Array.isArray(rp.info) && rp.info.length) {
+          const roleModeNow = (E.loadState(id).roleMode || 'program');
           rp.info.forEach(function (x) {
-            if (/[?？]|请告诉|你想选|选谁|选择谁|告诉我/.test(String(x.text || ''))) {
-              const i = toIdx(x.seat); if (i >= 0 && askedSeats.indexOf(i) < 0) askedSeats.push(i);
+            const i = toIdx(x.seat); if (i < 0) return;
+            const t = String(x.text || '');
+            /* 程序已发好牌时，绝不允许说书人再改角色或重复发角色：只放行非角色类信息 */
+            if (roleModeNow === 'program') {
+              const m = t.match(/你的角色是[【\[]([^】\]]+)[】\]]/);
+              if (m) { E.log(id, '系统', '已忽略说书人重复分配角色的尝试（第 ' + (i + 1) + ' 号 → ' + m[1] + '）', true); return; }
             }
+            const r = E.giveInfo(id, i, t);
+            if (r && r.skipped) return;
+            applied.info++;
+            if (/[?？]|请告诉|你想选|选谁|选择谁|告诉我/.test(t) && askedSeats.indexOf(i) < 0) { askedSeats.push(i); newlyAsked.push(i); }
           });
         }
+        if (rp && Array.isArray(rp.markers)) rp.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
+        if (rp && Array.isArray(rp.deaths)) rp.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
+        if (rp && rp.voteTarget) {
+          const vt = toIdx(rp.voteTarget);
+          if (vt >= 0) { const r = E.openVote(id, vt); if (r && r.ok) applied.vote = 'open:' + (vt + 1); }
+        }
+        if (rp && rp.resolveVote) {
+          const r = E.resolveVote(id);
+          if (r && r.ok) applied.vote = (r.executed === false ? 'failed' : 'executed') + ':' + (r.yes != null ? (r.yes + '/' + r.no) : '');
+          if (r && r.win && r.win.over) applied.win = r.win.side;
+        }
+        if (rp && rp.nextPhase) {
+          const r = E.setPhase(id, rp.nextPhase);
+          if (r && r.ok) applied.phase = rp.nextPhase;
+        }
+        const didAct = (applied.info > pre.info) || (applied.markers > pre.markers) || (applied.deaths > pre.deaths) || (applied.phase && applied.phase !== pre.phase);
+        stallN = didAct ? 0 : (stallN + 1);
+        if (applied.phase) break;   /* 阶段已经推进，本阶段主持结束 */
+        if (stRound >= ST_SAFETY_CAP) break;
+        /* 这一轮向玩家提了问：先驱动他们私下回答，再等回答落库，不能问完就收工 */
+        if (newlyAsked.length) {
+          askDriven = true;
+          try { runRound(id, { seats: newlyAsked, replyTo: 'storyteller' }); } catch (e) { /* ignore */ }
+        }
+        if (askedSeats.length) {
+          const t0 = Date.now();
+          let answered = false;
+          for (;;) {
+            const stNow = E.loadState(id);
+            const fresh = (stNow.messages || []).slice(stLastN);
+            answered = fresh.some(function (m) {
+              return m.from !== 'storyteller' && askedSeats.indexOf(Number(m.from)) >= 0;
+            });
+            if (answered) break;
+            if (Date.now() - t0 >= WAIT_ANSWER_MS) break;
+            await sleep(600);
+          }
+          stLastN = msgN();
+          if (!answered) break;
+          continue;
+        }
+        /* 没问人：做了事且没有新消息就可以收工；空转则再来一轮，最多两轮空转 */
         const nowSt = msgN();
-        if (nowSt <= stLastN || stRound >= ST_SAFETY_CAP) break;
-        /* 只有「被问过的玩家回答了」才值得重想；纯闲聊不打断裁定 */
-        const stNow = E.loadState(id);
-        const fresh = (stNow.messages || []).slice(stLastN);
-        const answered = fresh.some(function (m) {
-          return m.from !== 'storyteller' && askedSeats.indexOf(Number(m.from)) >= 0;
-        });
-        if (!answered) break;
+        if (didAct && nowSt <= stLastN) break;
+        if (stallN >= 2) break;
         stLastN = nowSt;
+      }
+      /* 兜底：整段主持结束时仍未宣布推进，且本阶段没有任何待回答的提问 → 自动进入白天，
+         绝不能让整局永远停在夜里（这是之前「主持完成却不到白天」的根因之一）。 */
+      if (isNight && applied.phase === null && !askedSeats.length) {
+        const stAfter = E.loadState(id);
+        if (stAfter.phase === 'night') {
+          const r = E.setPhase(id, 'day');
+          if (r && r.ok) { applied.phase = 'day'; E.log(id, '系统', '说书人没有宣布推进，系统自动进入白天', true); }
+        }
       }
       if (!out) throw new Error('说书人没有返回结果');
       const parsed = parseReply(out.text);
-
-      const applied = { info: 0, markers: 0, deaths: 0, phase: null, vote: null, win: null };
-/* 兜底：角色表为空时用引擎的机械发牌补齐（按人数配比、随机、不重复），
-   保证任何情况下玩家都能拿到唯一且合理的身份。roleMode='storyteller' 且角色表已填时不干预。 */
-{
-  const cur = E.loadState(id);
-  const mode0 = (cur && cur.roleMode) || 'program';
-  const empty = !Object.keys((cur && cur.roles) || {}).length;
-  if (cur && empty && (mode0 === 'program' || cur.phase === 'night') && (cur.seats || []).length) {
-    const d = E.dealRoles(id);
-    if (d && d.ok === false) E.log(id, '系统', '兜底发牌失败：' + d.error, true);
-  }
-}
-      if (parsed.think) E.think(id, 'storyteller', parsed.think);
-      if (parsed.say) E.say(id, 'storyteller', parsed.say, 'town');
-      const roleModeNow = (E.loadState(id).roleMode || 'program');
-      parsed.info.forEach(function (x) {
-        const i = toIdx(x.seat); if (i < 0) return;
-        /* 程序已发好牌时，绝不允许说书人再改角色或重复发角色：只放行非角色类信息 */
-        if (roleModeNow === 'program') {
-          const m = String(x.text || '').match(/你的角色是[【\[]([^】\]]+)[】\]]/);
-          if (m) { E.log(id, '系统', '已忽略说书人重复分配角色的尝试（第 ' + (i+1) + ' 号 → ' + m[1] + '）', true); return; }
-        }
-        E.giveInfo(id, i, x.text); applied.info++;
-      });
-      /* 说书人夜里私聊询问的问题，AI 必须回答：问句类的 info 落库后立刻驱动该座位私下回话 */
-      const askSeats = [];
-      parsed.info.forEach(function (x) {
-        const i = toIdx(x.seat);
-        const t = String(x.text || '');
-        if (i >= 0 && /[?？]|请告诉|你想选|选谁|选择谁|告诉我/.test(t)) askSeats.push(i);
-      });
-      if (askSeats.length) {
-        setTimeout(function () {
-          try { runRound(id, { seats: askSeats, replyTo: 'storyteller' }); } catch (e) { /* ignore */ }
-        }, 400);
-      }
-      parsed.markers.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.toggleMarker(id, i, x.marker); applied.markers++; } });
-      parsed.deaths.forEach(function (n) { const i = toIdx(n); if (i >= 0) { const r = E.kill(id, i, '夜间死亡'); if (r && r.ok) applied.deaths++; } });
-      /* 白天：说书人自己判断何时发起 / 结算处决投票 */
-      if (parsed.voteTarget) {
-        const vt = toIdx(parsed.voteTarget);
-        if (vt >= 0) { const r = E.openVote(id, vt); if (r && r.ok) applied.vote = 'open:' + (vt + 1); }
-      }
-      if (parsed.resolveVote) {
-        const r = E.resolveVote(id);
-        if (r && r.ok) applied.vote = (r.executed === false ? 'failed' : 'executed') + ':' + (r.yes != null ? (r.yes + '/' + r.no) : '');
-        if (r && r.win && r.win.over) applied.win = r.win.side;
-      }
-      if (parsed.nextPhase) {
-        const r = E.setPhase(id, parsed.nextPhase);
-        if (r && r.ok) applied.phase = parsed.nextPhase;
-      }
       run.result = { think: parsed.think, say: parsed.say, applied: applied, raw: out.text };
       run.done = true;
       E.log(id, '说书人', '主持完成：告知 ' + applied.info + ' 条信息，标记 ' + applied.markers + ' 个状态，死亡 ' + applied.deaths + ' 人'
