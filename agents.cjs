@@ -1568,41 +1568,127 @@ function nomSay(id, text){
   E.say(id, 'storyteller', String(text), 'town');
 }
 
-/* 提名相关的专用提示词：让模型只判断「要不要提名 / 怎么辩护 / 举不举手」 */
+/* 提名相关的专用提示词：程序负责流程与结算，模型只负责「要不要提名 / 理由 / 辩护 / 举不举手」。
+   每一种都附带该玩家自己能看到的一切（身份、私下信息、最近公开对话、当前提名与投票进度），
+   并要求返回固定结构的 JSON，由程序解析落库（m12353）。 */
+function nomVoteSnapshot(id, seat){
+  /* 当前这项提名的投票进度：谁已经表态、谁还没表态、票权、死亡票、管家主人 */
+  const out = { target:0, targetName:'', from:0, fromName:'', reason:'', voted:[], pending:[], myWeight:1, myMaster:-1, masterVoted:false, dead:false, deadVoteUsed:false, secret:false };
+  try {
+    const ns = E.nomState(id);
+    const s = E.loadState(id);
+    if (!ns || !ns.ok) return out;
+    const cur = ns.nom && ns.nom.cur;
+    if (cur) {
+      out.target = cur.target; out.from = cur.from;
+      out.targetName = (cur.target+1) + ' 号 ' + ((s.seats[cur.target]||{}).name || '');
+      out.fromName = (cur.from+1) + ' 号 ' + ((s.seats[cur.from]||{}).name || '');
+      out.reason = String(cur.reason || cur.reasonHint || '');
+      Object.keys(cur.hands || {}).forEach(function(k){ if (cur.hands[k] !== undefined) out.voted.push(Number(k)); });
+      (s.seats||[]).forEach(function(x,i){ if (ns.alive[i] && out.voted.indexOf(i) < 0) out.pending.push(i); });
+    }
+    out.myWeight = (ns.weights && ns.weights[seat] !== undefined) ? ns.weights[seat] : 1;
+    out.myMaster = (ns.butler && ns.butler[seat] !== undefined) ? ns.butler[seat] : -1;
+    if (out.myMaster >= 0 && cur && cur.hands) out.masterVoted = !!cur.hands[out.myMaster];
+    out.dead = !s.alive[seat];
+    out.deadVoteUsed = !!(ns.deadVoteUsed && ns.deadVoteUsed[seat]);
+    out.secret = !!ns.secret;
+  } catch (e) {}
+  return out;
+}
 function buildNomPrompt(id, seat, kind, extra){
+  extra = extra || {};
   const v = viewFor(id, seat);
   const s = E.loadState(id);
+  const vs = nomVoteSnapshot(id, seat);
   const lines = [];
-  lines.push('【局面】第 ' + (s.day||1) + ' 天白天，提名与投票阶段。存活 ' + v.aliveList.join('、') + '；已出局 ' + (v.deadList.join('、') || '无') + '。');
+  lines.push('【局面】第 ' + (s.day||1) + ' 天白天，提名与投票阶段。存活：' + v.aliveList.join('、') + '；已出局：' + (v.deadList.join('、') || '无') + '。');
   lines.push('【你的身份】你是 ' + (seat+1) + ' 号 ' + v.name + '，角色 ' + (v.role || '未知') + (v.ability ? ('（' + v.ability + '）') : '') + '。');
-  if (v.privateInfo && v.privateInfo.length) lines.push('【你掌握的私下信息】\n' + v.privateInfo.join('\n'));
-  lines.push('【最近的公开对话】\n' + renderMessages(v.messages, s.seats));
+  if (v.privateInfo && v.privateInfo.length) lines.push('【你掌握的私下信息】');
+  if (v.privateInfo && v.privateInfo.length) (v.privateInfo || []).forEach(function(t){ lines.push('- ' + String(t)); });
+  const secret = (v.secretInfo || []);
+  if (secret.length) {
+    lines.push('【注意】上面标着「本夜刚得知」的信息，今晚结束前不能公开引用，但可以影响你的判断。');
+  }
+  lines.push('【最近的公开对话】');
+  lines.push(renderMessages(v.messages, s.seats));
   lines.push(stylePrompt(id));
+  lines.push(talkBiasText(id));
   if (kind === 'propose') {
     lines.push('【现在】轮到你表态：今天要不要发起提名？');
-    lines.push('规则：每位存活玩家每天只有 1 次提名权；同一时间只能有一项提名；可以提名自己。');
-    lines.push('【提名礼仪】正式流程是：① 你先只说「@X 提名 @Y」② 说书人点名请你说明理由，你才说理由 ③ 说书人请被提名者反驳 ④ 才开始投票。所以现在这一步你只要给出「提名谁」以及你打算说的理由，不要自己一上来就把理由倒出来。');
+    lines.push('规则：每位存活玩家每天只有 1 次提名权；同一时间只能有一项提名；可以提名自己；被提名过的目标今天不能再被提名。');
+    lines.push('【提名礼仪】正式流程是：① 你先只说「@X 提名 @Y」② 程序点名请你说明理由，你才说理由 ③ 程序请被提名者反驳 ④ 才开始投票。所以现在这一步你只要给出「提名谁」以及你打算说的理由，不要自己一上来就把理由倒出来。');
     lines.push('想提名就把 nominate 写 true，并在 target 写被提名者的座位号（从 1 开始），reason 写你稍后要公开说明的提名理由（一两句，直接对全桌说）。');
     lines.push('不想提名就 nominate 写 false，target 写 0，reason 留空。不要为了凑热闹乱提名。');
     lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","nominate":true或false,"target":座位号,"reason":"提名理由"}');
   } else if (kind === 'reason') {
-    lines.push('【现在】你刚刚提名了 ' + extra.target + ' 号 ' + extra.targetName + '，说书人请你说明理由。');
+    lines.push('【现在】你刚刚提名了 ' + (extra.target ? (extra.target + ' 号 ' + (extra.targetName || '')) : vs.targetName) + '，程序请你说明理由。');
     if (extra.hint) lines.push('你原先的打算：「' + extra.hint + '」。可以照这个说，也可以按场上最新情况调整。');
     lines.push('说一两句话，直接对全桌说清楚你为什么要提名他。不要写「我要提名」这种客套，也不要长篇大论。');
     lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","say":"你的提名理由"}');
   } else if (kind === 'defense') {
-    lines.push('【现在】你被 ' + extra.from + ' 号 ' + extra.fromName + ' 提名了，理由：「' + (extra.reason||'（没有说明）') + '」。');
-    lines.push('请做被提名发言：为自己辩护、说明你的身份与信息、或者指出提名者的破绽。一两句话，直接对全桌说。');
+    lines.push('【现在】你被 ' + (extra.from || (vs.from+1)) + ' 号 ' + (extra.fromName || vs.fromName) + ' 提名了，理由：「' + (extra.reason || vs.reason || '（没有说明）') + '」。');
+    lines.push('请做被提名发言：为自己辩解、说明你的身份与信息、或者指出提名者的破绽。一两句话，直接对全桌说。');
+    lines.push('如果你已经出局，也可以说明自己被提名的处境——死亡玩家同样会被点名反驳。');
     lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","say":"你的被提名发言"}');
   } else {
-    lines.push('【现在】正在对 ' + extra.target + ' 号 ' + extra.targetName + ' 投票（被提名理由：「' + (extra.reason||'无') + '」）。');
-    lines.push('请决定你要不要举手赞成处决他。举手就是公开支持今天处决这个人。');
-    lines.push('判断依据：你信不信他的身份、他的死对哪一方有利、你自己会不会因此暴露。想清楚再举手，别随大流。');
-    if (extra.dead) lines.push('注意：你已经出局，这一票是你的死亡票，投出去就没有了（除非你复活）。');
+    lines.push('【现在】正在对 ' + (extra.target ? (extra.target + ' 号 ' + (extra.targetName || '')) : vs.targetName) + ' 投票（被提名理由：「' + (extra.reason || vs.reason || '无') + '」）。');
+    lines.push('请决定你要不要举手赞成处决 ta。举手＝公开支持今天处决这个人，圆桌上会用 ✋ 标出来。');
+    lines.push('判断依据：你信不信 ta 的身份、ta 的死对哪一方有利、你自己会不会因此暴露、这一步投票会不会把无辜的人推上处决台。想清楚再举手，别随大流。');
+    lines.push('规则要点：票数要「严格最多」且达到存活人数的一半才能上处决台；每人每天只有一次提名权，被提名次数也有限。');
+    if (vs.myWeight !== 1) {
+      lines.push('【你的票权】程序已经按你的角色能力算好：你这一票算 ' + vs.myWeight + ' 票' + (vs.myWeight < 0 ? '（负票会抵消别人的票）' : '') + '。这一项不需要你判断，程序会自动加权。');
+    }
+    if (vs.myMaster >= 0) {
+      lines.push('【管家规则】你的主人是 ' + (vs.myMaster+1) + ' 号。' + (vs.masterVoted ? '主人已经举手，你可以跟着举手。' : '主人还没举手——你现在举手程序会拒绝。可以等主人表态，或者这一轮放弃。'));
+    }
+    if (vs.dead) {
+      lines.push('【你已经出局】你手上的是一张死亡票。' + (vs.deadVoteUsed ? '这张票你已经用掉了，这次不能再投。' : '投出去就没有了（除非你复活），所以只在关键时刻用。'));
+    }
+    if (vs.voted.length) {
+      lines.push('【目前的投票进度】已有 ' + vs.voted.length + ' 人举手：' + vs.voted.map(function(x){ return (x+1)+' 号'; }).join('、') + '。');
+    }
+    if (vs.pending.length) {
+      lines.push('还没表态：' + vs.pending.map(function(x){ return (x+1)+' 号'; }).join('、') + '。');
+    }
     lines.push('【举手方式】举手只由 hand 字段决定，圆桌上会用 ✋ 显示，不需要也不允许用发言说出「我举手 / 我投票」这类话——投票阶段没有公开发言的环节。');
-    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","hand":true或false,"say":"留空字符串即可"}');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","hand":true或false,"say":""}');
   }
-  return { prompt: lines.join('\n'), view: v };
+  return { prompt: lines.join('\n'), view: v, vote: vs };
+}
+/* 让一位 Agent 就提名相关的一件事表态。三件事都要保证拿到「结构化结果」：
+   ①调用包超时，绝不让整轮卡住；②解析失败/字段缺失时补一次强指令重试；③最终失败写进 AI 报错面板，
+   由程序给一个安全的默认值（提名=false / 举手=false / 发言用兜底句）。 */
+async function askSeat(id, seat, kind, extra){
+  const built = buildNomPrompt(id, seat, kind, extra || {});
+  const route = routeFor(id, seat);
+  const wantKey = (kind === 'vote') ? 'hand' : 'say';
+  async function once(prompt, strict){
+    let out = null;
+    try {
+      out = await Promise.race([
+        callModel({ game:id, seat:seat, prompt:prompt, system:playerSystem(id, seat), provider:route.provider, model:route.model, maxTokens:600 }),
+        new Promise(function (res) { setTimeout(function () { res({ error: '模型调用超时（' + Math.round(MODEL_TIMEOUT_MS/1000) + ' 秒）' }); }, MODEL_TIMEOUT_MS); })
+      ]);
+    } catch (e) { out = { error: String((e && e.message) || e) }; }
+    if (!out || out.error) return { error: (out && out.error) || '调用失败' };
+    const p = parseReply(out.text);
+    const obj = extractObject(String(out.text || '')) || {};
+    const hasField = (kind === 'vote') ? (typeof obj.hand === 'boolean') : (typeof obj.say === 'string' && String(obj.say).trim());
+    return { parsed:p, obj:obj, hasField: hasField, text: out.text };
+  }
+  let r = await once(built.prompt);
+  if (!r.error && !r.hasField) {
+    const strict = built.prompt + '\n\n【再强调一次】上一次的回答缺少必填字段（' + wantKey + '），这是无效输出。只输出一个 JSON 对象，不要任何解释文字，' + (kind === 'vote' ? 'hand 必须是 true 或 false。' : 'say 必须是一句非空的话。');
+    r = await once(strict, true);
+  }
+  if (r.error || !r.hasField) {
+    try { E.aiError(id, seat, '提名阶段的「' + kind + '」表态失败：' + (r.error || '输出缺少必填字段 ' + wantKey)); } catch (e) {}
+    const fallback = (kind === 'vote') ? { think:'', say:'', hand:false } : { think:'', say:'' };
+    return { parsed:{ think:'', say: fallback.say, whisper:[], info:[], markers:[], deaths:[], nextPhase:'', reply:'', nominate:null, ops:[] }, obj: fallback, error:null, degraded:true };
+  }
+  if (r.parsed && r.parsed.think) { try { E.think(id, seat, r.parsed.think); } catch (e) {} }
+  return { parsed:r.parsed, obj:r.obj || {} };
 }
 
 async function askSeat(id, seat, kind, extra){
