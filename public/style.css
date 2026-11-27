@@ -389,6 +389,12 @@ body.night .nomclk{border-color:var(--edge2)}
 .nomgate b{color:var(--gold);font-size:15px}
 body.night .nomgate{background:rgba(156,143,224,.12);border-color:rgba(156,143,224,.34)}
 
+/* 圆桌中间：四种身份类型的基础配比（角色能力影响之前） */
+.compbar{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 12px;margin-top:6px;font-size:12px;line-height:1.4}
+.compitem{white-space:nowrap;opacity:.9}
+.compitem b{margin-left:3px;font-size:14px;font-weight:900;vertical-align:-1px}
+body.night .compitem{opacity:.85}
+
 /* 投票：秘密计票提示与票权角标 */
 .nomsecret{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:13px;line-height:1.5;
   background:rgba(120,90,200,.16);border:1px solid rgba(150,120,230,.38);color:#d8ccff}

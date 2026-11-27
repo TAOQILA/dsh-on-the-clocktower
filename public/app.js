@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.2';
+var VERSION = '0.15.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -382,6 +382,7 @@ function render(force){
         ((g && g.win && g.win.over) ? winBanner(g) : (
           '<div class="phase">'+(PHZH[cur]||cur)+'</div>'+
           '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
+          compBar(g, seats.length) +
           '<div class="story">'+story+'</div>'+
           ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')
         ))+
@@ -464,6 +465,29 @@ function bubblesFor(seat){
   var msgs = (S.chatMsgs || []).filter(function(m){ return m.from === seat; });
   /* 只显示最近一条：有新发言就替换掉上一条，避免头像上方堆成一片 */
   return msgs.slice(-1);
+}
+/* 四种身份类型的基础配比（角色能力影响之前）。与 engine.cjs 的 compositionFor 保持一致：
+   五人 [3,0,1,1] / 六人 [3,1,1,1] / 七人 [5,0,1,1] …，其余按官方公式兜底。 */
+function compFor(n){
+  var table = { 5:[3,0,1,1], 6:[3,1,1,1], 7:[5,0,1,1], 8:[5,1,1,1], 9:[5,2,1,1], 10:[7,2,1,1],
+                11:[7,2,1,1], 12:[7,2,1,1], 13:[9,2,1,1], 14:[9,3,1,1], 15:[9,3,1,1] };
+  if (table[n]) return table[n].slice();
+  if (n < 5) return [Math.max(0, n-2), 0, 1, 1];
+  var townsfolk = n - 2 - Math.max(1, Math.floor((n-7)/3));
+  return [Math.max(1, townsfolk), Math.max(0, n - townsfolk - 2), 1, 1];
+}
+var COMP_LABELS = ['镇民','外来者','爪牙','恶魔'];
+var COMP_COLORS = ['#5b9bd5','#5fbf7f','#e0913a','#d9534f'];
+/* 圆桌中间的配比条：本局四种身份类型各几人 */
+function compBar(g, n){
+  var comp = (g && g.comp && g.comp.length === 4) ? g.comp : compFor(n);
+  if (!comp || !comp.length) return '';
+  var total = 0; comp.forEach(function(x){ total += Number(x)||0; });
+  if (!total) return '';
+  var cells = comp.map(function(x,i){
+    return '<span class="compitem" style="color:'+COMP_COLORS[i]+'">'+COMP_LABELS[i]+'<b>'+x+'</b></span>';
+  }).join('');
+  return '<div class="compbar" title="本局基础配比：按板子规则的人数配比，未计入任何角色能力带来的增减">'+cells+'</div>';
 }
 function drawTable(seats,g){
   var table = $('#table'), n = seats.length, cx=50, cy=50, rx=36, ry=36;

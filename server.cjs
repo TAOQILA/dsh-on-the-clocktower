@@ -67,6 +67,8 @@ function buildApi(opts){
   game: (q) => {
     const s = E.loadState(q.id);
     if (!s) return s;
+    /* 本局四种身份类型的基础配比（角色能力影响之前）：这是公开信息，任何视角都可以下发 */
+    try { s.comp = E.compositionFor(((s.seats) || []).length); } catch (e) { s.comp = null; }
     /* 标记（中毒/醉酒/被保护等）属于说书人私有信息：非说书人视角一律清空，避免从前端或接口泄露 */
     const st = (q.storyteller === true || q.storyteller === 'true' || q.seat === 'storyteller');
     if (!st) {
