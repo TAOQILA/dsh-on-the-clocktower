@@ -453,3 +453,10 @@ body.night .nomsecret{background:rgba(90,70,170,.20);border-color:rgba(150,120,2
   padding:0 3px;border-radius:4px;background:rgba(201,162,39,.24);color:#f0dfa8;vertical-align:top}
 .nomclk .nombt{background:rgba(120,170,230,.24);color:#cfe4ff}
 body.night .nomclk .nomwt{background:rgba(201,162,39,.30);color:#f6e9c4}
+
+/* 设置页底部「本局 AI 报错」列表 */
+.aierrlist{max-height:320px;overflow:auto;margin-top:8px;border-top:1px solid rgba(255,255,255,.12)}
+.aierrrow{display:grid;grid-template-columns:110px 62px minmax(0,1fr);gap:8px;padding:6px 2px;font-size:13px;line-height:1.5;border-bottom:1px solid rgba(255,255,255,.07)}
+.aierrw{color:var(--gold);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aierrt{color:rgba(255,255,255,.45);font-variant-numeric:tabular-nums}
+.aierrx{color:#ff9b9b;word-break:break-word}

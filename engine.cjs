@@ -49,6 +49,10 @@ function createGame(cfg){
     nomCfg: Object.assign({ min: 15, softMax: 45, hardMax: 80, unanimous: true }, cfg.nomCfg || {}),
     /* 每位玩家自己维护的「我要提名谁」清单：白天随时可改，进提名阶段直接按清单执行 */
     nomIntents: {},
+    /* 本局发生过的 AI 调用错误：设置页底部「本局 AI 报错」直接读它 */
+    aiErrors: [],
+    /* 提名提议的表态：{ day, yes:{seat:true}, no:{seat:true} } */
+    nomAgree: { day: -1, yes: {}, no: {} },
     log: [], readAcks: []
   };
   cfg.seats.forEach((s,i)=>{
@@ -410,7 +414,13 @@ function say(id, seat, text, channel, to){
   /* 夜晚禁止玩家之间私聊，但允许与说书人私聊（夜里询问/回答角色选择） */
   if (ch==='private' && s.phase==='night') {
     const toSt = seat==='storyteller' || targets.indexOf('storyteller')>=0;
-    if (!toSt) return { ok:false, error:'夜晚禁止玩家间私聊，只可与说书人私聊' };
+    /* 邪恶阵营夜里可以闭着眼低声串供：恶魔要把三个伪装身份分给爪牙、商量谁扮谁，
+       这些话只能在邪恶内部说；善良玩家之间夜里依然禁止私聊。 */
+    const allEvil = seat!=='storyteller' && Number(seat)>=0
+      && alignOf(s, Number(seat))==='evil'
+      && targets.length>0
+      && targets.every(function(t){ return t!=='storyteller' && Number(t)>=0 && alignOf(s, Number(t))==='evil'; });
+    if (!toSt && !allEvil) return { ok:false, error:'夜晚禁止玩家间私聊，只可与说书人私聊' };
   }
   /* 正式处理一项提名时（提名理由 / 被提名发言 / 投票 / 读票 / 宣布结果），
      只有提名者、被提名者和说书人可以公开发言。
@@ -721,6 +731,33 @@ function dealEvilInfo(id){
   return { ok:true, minions: info.minionSeats, demons: info.demonSeats, bluffs: bluffs };
 }
 
+/* 记录一条 AI 报错：seat 可以是座位号或 'storyteller'。只保留最近 120 条。 */
+function aiError(id, seat, text){
+  const s = loadState(id);
+  if (!Array.isArray(s.aiErrors)) s.aiErrors = [];
+  s.aiErrors.push({ t: new Date().toISOString(), seat: seat, text: String(text || '').slice(0, 600) });
+  if (s.aiErrors.length > 120) s.aiErrors = s.aiErrors.slice(-120);
+  saveState(id, s);
+  return { ok: true };
+}
+function aiErrors(id){
+  const s = loadState(id);
+  return { ok: true, errors: Array.isArray(s.aiErrors) ? s.aiErrors.slice(-60) : [] };
+}
+/* 夜里允许和谁私聊：说书人永远可以；此外邪恶阵营可以互相低声串供（恶魔分配伪装、
+   商量刀口与投票），善良玩家之间夜里不能私聊。返回可私聊的座位数组（0 起）。 */
+function nightWhisperTargets(id, seat){
+  const s = loadState(id);
+  const me = Number(seat);
+  if (!(me >= 0) || !s.seats[me]) return [];
+  if (alignOf(s, me) !== 'evil') return [];
+  const out = [];
+  (s.seats || []).forEach(function(x, i){
+    if (i === me) return;
+    if (alignOf(s, i) === 'evil') out.push(i);
+  });
+  return out;
+}
 function roleInfoByName(name){
   try {
     if (!ROLE_LIST_CACHE) {
@@ -1501,10 +1538,29 @@ function dayPublicCount(id){
     return !isFinite(t) ? true : t >= since;
   }).length;
 }
-/* 是否所有存活玩家今天都在公聊里表示过「可以进提名」 */
+/* 提名提议：谁同意 / 谁不同意。玩家可以在公聊里说，AI 由系统逐个问一遍。 */
+function nomAgreeEnsure(s){
+  if (!s.nomAgree || s.nomAgree.day !== (s.day || 0)) s.nomAgree = { day: s.day || 0, yes: {}, no: {} };
+  return s.nomAgree;
+}
+function nomAgreeSet(id, seat, yes){
+  const s = loadState(id);
+  const a = nomAgreeEnsure(s);
+  const k = String(seat);
+  if (yes) { a.yes[k] = true; delete a.no[k]; } else { a.no[k] = true; delete a.yes[k]; }
+  saveState(id, s);
+  return { ok: true, yes: Object.keys(a.yes).length, no: Object.keys(a.no).length };
+}
+function nomAgreeState(id){
+  const s = loadState(id);
+  const a = nomAgreeEnsure(s);
+  return { ok: true, yes: Object.keys(a.yes).map(Number), no: Object.keys(a.no).map(Number) };
+}
+/* 是否所有存活玩家今天都表过态「可以进提名」：公聊说过也算，系统问过并答同意也算 */
 function allAgreeNominate(id){
   const s = loadState(id);
   const since = s.dayStarted ? new Date(s.dayStarted).getTime() : 0;
+  const a = nomAgreeEnsure(s);
   const said = {};
   (s.messages || []).forEach(function(m){
     if (m.channel !== 'town') return;
@@ -1514,7 +1570,9 @@ function allAgreeNominate(id){
   });
   const alive = [];
   (s.seats || []).forEach(function(x, i){ if (s.alive[i]) alive.push(i); });
-  return alive.length > 0 && alive.every(function(i){ return said[String(i)] === true; });
+  return alive.length > 0 && alive.every(function(i){
+    return said[String(i)] === true || a.yes[String(i)] === true;
+  });
 }
 /* 给说书人与前端共用的一道闸：stage = early/window/overdue/hard/unanimous */
 function nomGate(id){
@@ -1669,4 +1727,4 @@ module.exports = { createGame, createAndStart, setSeatModel, loadState, saveStat
   revive, forceRole, setApparent, setAlignment, setShield, clearShield, markUsed, isUsed, swapSeats, setMarker, clearMarker,
   grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf, nomIntents, nomSetIntent, nomClearIntents, nomPickIntent, nomDropIntent,
   nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked,
-  adminExecute, adminSnapshot, dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat };
+  adminExecute, adminSnapshot, dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat, nightWhisperTargets, aiError, aiErrors, nomAgreeSet, nomAgreeState };

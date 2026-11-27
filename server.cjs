@@ -205,6 +205,9 @@ function buildApi(opts){
   /* 提名与投票 */
   nomination: (b) => A.runNomination(b.id, b),
   nomGate: (b) => E.nomGate(b.id),
+    aiErrors: (b) => E.aiErrors(b.id),
+    nomAgreeAsk: async (b) => A.askNomibationAgreement(b.id, { reason: b.reason }),
+    nomAgreeState: (b) => E.nomAgreeState(b.id),
   setNomCfg: (b) => E.setNomCfg(b.id, { min:b.min, softMax:b.softMax, hardMax:b.hardMax, unanimous:b.unanimous }),
   nomStatus: (b) => A.nomStatus(b.id),
   nomState: (b) => E.nomState(b.id),

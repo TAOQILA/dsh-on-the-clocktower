@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.10';
+var VERSION = '0.15.11';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -24,7 +24,7 @@ var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
   showThinking:true, storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, dmView:'list', nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
-  nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
+  nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'', aiErrs:null };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -51,7 +51,7 @@ async function init(){
   }
   render();
 }
-function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); if(t==='cheat') loadStoryLog().then(function(){ render(); }); }
+function setTab(t){ S.tab=t; render(); if(t==='wiki') loadWiki(); if(t==='log'&&S.history===null) loadHistory(); if(t==='cheat') loadStoryLog().then(function(){ render(); }); if(t==='settings') loadAiErrors(); }
 /* 建局偏好落盘：刷新页面后座位名/模型、说书人模型、剧本都还在 */
 var PREF_KEY = 'ran.prefs.v1';
 var ACTIVE_GAME_ID = '';
@@ -563,7 +563,7 @@ function stBox(g){
   var isMe = (g ? st.type === 'player' : meZone()==='story');
   return '<div class="stbox" data-zone="story" onclick="if(S.holdMe){dropMe(\'story\');}">'+
     stBubbles() +
-    '<div class="sttoken">'+(isMe?'我':'AI')+'</div>'+
+    '<div class="sttoken">'+esc(Array.from(String(isMe?'我':(st.name||'说书人'))).slice(0,2).join(''))+'</div>'+
     '<div class="stname">'+esc(st.name||'说书人')+'</div>'+
     (S.showThinking !== false && S.story && S.story.running ? '<div class="thinking">思考中…</div>' : '')+
     '<div class="strole">说书人</div></div>';
@@ -939,6 +939,30 @@ async function startNomination(){
   catch(e){ S.startError = '启动提名失败：'+((e&&e.message)||e); render(true); return; }
   await loadNom(); render(); pollNom();
 }
+/* 提议进入提名阶段：逐个问所有存活 AI 同不同意，全员同意就提前进；
+   只要有人说不同意，就留在白天继续聊。 */
+async function proposeNomination(){
+  if (!S.game || S.nomAgreeBusy) return;
+  S.nomAgreeBusy = true;
+  S.nomAgreeMsg = '正在逐个询问所有 AI 是否同意进入提名阶段…';
+  render(true);
+  var r = null;
+  try { r = await api('nomAgreeAsk',{ id: S.game.id }); }
+  catch(e){ S.nomAgreeBusy = false; S.nomAgreeMsg = '询问失败：'+((e&&e.message)||e); render(true); return; }
+  S.nomAgreeBusy = false;
+  await loadChat();
+  if (r && r.allAgree){
+    S.nomAgreeMsg = '全员同意，进入提名阶段。';
+    render(true);
+    startNomination();
+    return;
+  }
+  var no = (r && r.answers) ? r.answers.filter(function(x){ return !x.agree; }) : [];
+  S.nomAgreeMsg = no.length
+    ? ('还有 '+no.length+' 位不同意现在进提名：'+no.map(function(x){ return (x.seat+1)+' 号 '+(x.name||'').split(' ').slice(-1)[0]; }).join('、')+'。继续讨论吧。')
+    : '没有收到明确答复，先留在白天。';
+  render(true);
+}
 function pollNom(){
   if (!S.game) return;
   if (S.nomPolling) return;
@@ -1038,7 +1062,10 @@ function nomPanel(){
       return '<div class="section"><h3>提名与投票</h3>' +
         '<p class="muted">白天讨论得差不多了，就可以进入提名阶段：每位存活玩家每天有一次提名权，被提名者拿到的票数过半、且为当天最高，才会上处决台。</p>' +
         prog +
-        '<div class="row"><button onclick="startNomination()">开始提名阶段</button></div></div>';
+        '<div class="row"><button onclick="startNomination()">开始提名阶段</button>' +
+        '<button onclick="proposeNomination()">先问问大家愿不愿意</button></div>' +
+        (S.nomAgreeMsg ? '<div class="muted">'+esc(S.nomAgreeMsg)+'</div>' : '') +
+        '</div>';
     }
     return '';
   }
@@ -1286,11 +1313,10 @@ function cheatPanel(seats, sel){
   var roleOpts = '<option value="">—</option>' + (S.script ? S.script.roles : []).map(function(r){ return '<option>'+r+'</option>'; }).join('');
   var seatOpts = seats.map(function(s,i){ return '<option value="'+i+'"'+(i===S.selSeat?' selected':'')+'>'+(i+1)+' 号 '+esc(s.name)+'</option>'; }).join('');
   var seatRow = '<div class="row">目标座位：<select id="cheatSeat" onchange="S.selSeat=+this.value;render()">'+seatOpts+'</select></div>';
-  var h = '<div class="section"><h3>作弊</h3><p class="muted">这里的操作会直接写进对局，说书人 Agent 不会收到通知。仅在救场或测试时使用。</p>'
- + '<div class="cheattip"><b>最高权限指令</b>：在公聊或私聊里发送 <code>/admin 内容</code>（等价写法：<code>/ad</code> <code>/a</code> <code>/ch</code> <code>/cheat</code> <code>/c</code> <code>/z</code> <code>/zb</code> <code>/g</code> <code>/gl</code> <code>/gly</code> <code>/管理员</code> <code>/管理</code> <code>/作弊</code> <code>/作</code>，忽略大小写），'
- + '指令会直接下达给说书人，它对说书人是最高权限：必须如实回答，不再受「不能透露别人的角色」这类限制。指令与回答都不会出现在公聊。</div>'
- + '<div class="cheattip"><b>可以直接下达的操作</b>：处决/杀死/复活某人、把某人改成某角色、改阵营、免死、推进到白天或夜晚、宣布终局（说明是善良还是邪恶胜利）。这些指令由引擎直接执行并立刻写进真实状态，不会再出现「说书人嘴上说处决了、实际没死」的情况。</div>'
-    + '指令本身不会出现在公聊（公聊只留一行提示），回答只会回到你这里，别的玩家看不到。</div>'
+  var h = '<div class="section"><h3>作弊</h3><p class="muted">直接改写对局，说书人不会收到通知；只在救场或测试时用。</p>'
+    + '<div class="cheattip"><b>最高权限指令</b>：公聊或私聊发 <code>/admin 内容</code>（也可写 <code>/a</code> <code>/c</code> <code>/g</code> <code>/管理员</code> 等，见下）。指令直接交给说书人，它必须如实照做，回答只回到你这里。</div>'
+    + '<div class="cheattip"><b>可执行的命令</b>：处决 / 杀死 / 复活、改角色、改阵营、免死、推进到白天或夜晚、宣布终局（善良或邪恶胜利）。这些由引擎直接落进真实状态，不会再出现「嘴上说处决了、其实没死」。</div>'
+    + '<div class="cheattip muted">别名：/admin /ad /a /ch /cheat /c /z /zb /g /gl /gly /管理员 /管理 /作弊 /作（不分大小写）</div>'
     + seatRow;
   h += '<div class="cheatgrp"><h4>发言与驱动</h4>'+
     '<div class="row"><input id="cheatSay" class="smname-input" placeholder="用这个座位发一条公开消息">'+
@@ -1356,6 +1382,37 @@ async function loadStoryLog(){
   catch(e){ S.storyLog = []; }
 }
 /* 设置页：所有开关分组整理 */
+/* 本局 AI 调用报错：模型超时、接口报错、返回空内容等都会记进 state.aiErrors，
+   说书人和玩家各自的失败都能在这里查到，方便判断某一轮为什么没人说话。 */
+function aiErrPanel(){
+  var list = S.aiErrs;
+  var head = '<div class="row"><button onclick="loadAiErrors()">刷新</button>'
+    + '<span class="muted">' + (S.game ? '只显示当前这一局' : '还没有对局') + '</span></div>';
+  if (!S.game) return head + '<div class="muted">进入一局游戏后这里会列出 AI 的报错。</div>';
+  if (!list) return head + '<div class="muted">读取中…</div>';
+  if (!list.length) return head + '<div class="muted">本局目前没有 AI 报错。</div>';
+  var seats = (S.game.seats || []);
+  var who = function(w){
+    if (w === 'storyteller') return '说书人';
+    var n = Number(w);
+    if (isFinite(n) && seats[n]) return (n+1) + ' 号 ' + esc(seats[n].name);
+    return String(w);
+  };
+  var rows = list.slice().reverse().map(function(e){
+    var t = String(e.t || '');
+    var hm = t.slice(11, 19);
+    return '<div class="aierrrow"><span class="aierrw">'+who(e.seat)+'</span>'
+      + '<span class="aierrt">'+hm+'</span>'
+      + '<span class="aierrx">'+esc(e.text)+'</span></div>';
+  }).join('');
+  return head + '<div class="aierrlist">' + rows + '</div>';
+}
+async function loadAiErrors(){
+  if (!S.game) { S.aiErrs = null; return; }
+  try { var d = await api('aiErrors', { id: S.game.id }); S.aiErrs = (d && d.errors) || []; }
+  catch(e){ S.aiErrs = null; }
+  render(true);
+}
 function settingsPanel(){
   function sw(key,label,desc){
     return '<div class="setrow"><label><input type="checkbox" '+(S[key]!==false?'checked':'')
@@ -1396,6 +1453,7 @@ function settingsPanel(){
         '<button class="pill'+(S.showDm?' on':'')+'" onclick="toggleDm()">'+(S.showDm?'收起':'展开')+'</button></div>'+
         '<div class="muted">私聊浮层默认盖在圆桌上，不挤压其它面板。</div></div>'+
     '</div>'+
+    '<div class="section"><h3>本局 AI 报错</h3>'+aiErrPanel()+'</div>'+
     '<div class="section"><h3>设置 · 重置</h3>'+
       '<div class="row"><button onclick="if(confirm(\'清除本机保存的所有建局偏好？\')){localStorage.removeItem(PREF_KEY);location.reload();}">清除本机偏好</button></div>'+
       '<div class="muted">会清掉剧本、人数、昵称、模型、外观设置，回到默认。</div></div>';
@@ -1735,8 +1793,12 @@ function chatMsgsHtml(g, channel, peer){
     var ch = (m.channel === 'private') ? 'private' : 'town';
     if (channel && ch !== channel) return false;
     if (channel === 'private' && peer !== undefined && peer !== null && peer !== ''){
-      /* 私聊按人分栏：只显示「我」与这个对象之间的往来 */
-      var others = [String(m.from)].concat((m.to || []).map(String)).filter(function(x){ return x !== selfWho; });
+      /* 私聊按人分栏：只显示「我」与这个对象之间的往来。
+         注意必须先确认这条消息和我有关——否则「说书人私聊 5 号」的内容会跑进我和 5 号的对话里。 */
+      var invol = (String(m.from) === String(selfWho)) || (m.to || []).map(String).indexOf(String(selfWho)) >= 0;
+      if (!invol) return false;
+      var others = [String(m.from)].concat((m.to || []).map(String)).filter(function(x){ return x !== String(selfWho); });
+      return others.indexOf(String(peer)) >= 0;
       return others.indexOf(String(peer)) >= 0;
     }
     return true;
@@ -2077,6 +2139,9 @@ function hlSeatNums(html){
   return parts.join('');
 }
 /* 把「@名字」标成对方座位的颜色。lookup = { names:[长名在前], colorOf(name) } */
+/* 把聊天文本里的「@昵称」和「裸昵称」都染上对应玩家的颜色。
+   裸昵称只认 2 个字以上的名字：像「2」「3」这种单字昵称如果也裸染色，
+   会把正文里的座位号、票数全染掉，反而看不清。 */
 function hlMentions(escaped, lookup){
   var s = String(escaped||'');
   if (!lookup || !lookup.names || !lookup.names.length){
@@ -2093,6 +2158,20 @@ function hlMentions(escaped, lookup){
       if (hit){
         out += '<span class="mention" style="color:'+lookup.colorOf(hit)+'">@'+hit+'</span>';
         i += 1 + hit.length;
+        continue;
+      }
+    } else {
+      /* 不带 @ 的裸昵称也染色：names 已按长度降序，先匹配长名 */
+      var bh = '';
+      for (var j = 0; j < names.length; j++){
+        var bn = names[j];
+        if (!bn || bn.length < 2) continue;
+        if (/^\d+$/.test(bn)) continue;
+        if (s.substr(i, bn.length) === bn){ bh = bn; break; }
+      }
+      if (bh){
+        out += '<span style="color:'+lookup.colorOf(bh)+';font-weight:700">'+bh+'</span>';
+        i += bh.length;
         continue;
       }
     }

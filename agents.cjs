@@ -367,6 +367,19 @@ function buildPrompt(id, seat, replyTo, mode) {
   }
   lines.push('【场上】存活：' + (v.aliveList.join('，') || '无'));
   lines.push('【称呼规则】提到任何一位玩家，一律写成「@名字」（例：@长庚 刚才的发言有问题）。只能用上面这份名单里的名字，别自己编名字。');
+  /* 邪恶阵营夜里的串供：恶魔要把三个伪装身份分给爪牙、商量谁扮谁；爪牙要回报自己打算怎么演。
+     夜里只有邪恶之间能私聊，善良玩家之间不行——所以这条只对邪恶角色显示。 */
+  if (v.phase === 'night' && v.faction && /恶魔|爪牙/.test(String(v.faction))) {
+    lines.push('【夜里可以闭眼串供】邪恶阵营之间可以在夜里私聊（善良玩家之间不行）。');
+    if (/恶魔/.test(String(v.faction))) {
+      lines.push('你是恶魔。上面「说书人私下告诉你的信息」里给了你爪牙是谁、以及三个可以拿来伪装的身份。');
+      lines.push('今晚请用 whisper 逐个私聊每一位爪牙（用他们的座位号），把这三个伪装身份原样告诉他们，并和他们商量谁扮哪一个——尽量一人一个、不要撞身份，尽量挑和你们发言风格不冲突的。');
+      lines.push('顺便可以商量今晚刀谁、明天怎么带节奏。这些只发给爪牙，不要发到公聊。');
+    } else {
+      lines.push('你是爪牙。今晚恶魔大概率会私聊你，把三个伪装身份分给你们。收到后回复一句你打算扮哪一个、准备怎么说，也可以主动说说你想刀谁。');
+      lines.push('如果恶魔还没找你，可以主动私聊恶魔问「我们三个伪装怎么分」。这些只发给邪恶同伴，不要发到公聊。');
+    }
+  }
   if (v.deadList.length) lines.push('已死亡：' + v.deadList.join('，'));
   if (v.nominations.length) {
     lines.push('最近提名：' + v.nominations.map(function (n) {
@@ -616,7 +629,9 @@ async function callModel(payload) {
       const flat = (text && typeof text === 'object') ? (text.text != null ? text.text : (text.content != null ? text.content : '')) : text;
       return { text: String(flat == null ? '' : flat) };
     } catch (err) {
-      return { error: String((err && err.message) || err) };
+      const msg = String((err && err.message) || err);
+      try { if (payload.game) E.aiError(payload.game, payload.seat, msg); } catch (e) {}
+      return { error: msg };
     }
   }
   const endpoint = process.env.AGENT_ENDPOINT;
@@ -699,7 +714,9 @@ function parseReply(raw) {
     /* 白天主持时：说书人自己判断现在是否该进入提名阶段 */
     enterNomination: obj.enterNomination === true
     ,/* 提名清单：null 表示这一轮没提到、不要改动；数组(可为空)表示用新清单覆盖 */
-    nominate: Array.isArray(obj.nominate) ? obj.nominate.map(Number).filter(function (n) { return n >= 1; }) : null
+    nominate: Array.isArray(obj.nominate) ? obj.nominate.map(Number).filter(function (n) { return n >= 1; }) : null,
+    /* 原始对象：个别流程（例如提名表态的 agree）要直接读字段 */
+    raw: obj
   };
 }
 
@@ -713,6 +730,9 @@ function dialectText(parsed) {
 
 /* ---------- 玩家 Agent 一轮（并发模型调用 / 串行落库） ---------- */
 const RUNNING = new Map();
+/* 私聊回复排队：这一局正在跑一轮时，收到的私聊回复请求先存这里，
+   等当前这一轮结束再补上。否则「我正在想事情」就等于永远不回玩家。 */
+const DM_QUEUE = new Map();
 const STORY_RUNNING = new Map();
 
 function status(id) {
@@ -762,7 +782,10 @@ async function applyOne(id, seat, out, opts, run){
   } else if (parsed.say && String(parsed.say).trim()) {
     E.say(id, seat, String(parsed.say).trim(), 'town');
   }
-  (isDm || nightNow ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY)).forEach(function (w) {
+  /* 夜里默认不许私聊，但邪恶阵营之间可以（恶魔分配伪装、商量刀口）。
+     E.say 会再拦一道，这里提前把善良玩家和说书人方向的私聊放行。 */
+  const evilNight = nightNow && /恶魔|爪牙/.test(String((viewFor(id, seat).faction) || ''));
+  (isDm ? [] : ((nightNow && !evilNight) ? [] : (parsed.whisper || []).slice(0, MAX_DM_PER_DAY))).forEach(function (w) {
     /* 模型给的座位号是 1 起，落库用 0 起 */
     const to = (w.to || []).map(function (n) { return Number(n) - 1; })
       .filter(function (n) { return n >= 0 && n < st.seats.length && n !== seat; });
@@ -884,6 +907,7 @@ async function thinkAndSpeak(id, seat, opts) {
     }
     if (!cur || cur.error) {
       if (out) break;
+      try { E.aiError(id, seat, (cur && cur.error) || '模型没有返回内容'); } catch (e) {}
       return cur;
     }
     out = cur;
@@ -898,7 +922,16 @@ async function thinkAndSpeak(id, seat, opts) {
 async function runRound(id, opts) {
   opts = opts || {};
   const cur = RUNNING.get(id);
-  if (cur && cur.running) return { ok: false, error: '这一局正在跑一轮，请等它结束' };
+  if (cur && cur.running) {
+    /* 私聊回复不能因为「正在跑一轮」就被丢掉：排队，等这一轮结束后自动补回 */
+    if (Array.isArray(opts.seats) && opts.seats.length && opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') {
+      const q = DM_QUEUE.get(id) || [];
+      q.push({ seats: opts.seats.slice(), replyTo: opts.replyTo });
+      DM_QUEUE.set(id, q);
+      return { ok: true, queued: true, total: q.length };
+    }
+    return { ok: false, error: '这一局正在跑一轮，请等它结束' };
+  }
   const s = E.loadState(id);
   const order = [];
   s.seats.forEach(function (x, i) {
@@ -964,12 +997,73 @@ async function runRound(id, opts) {
       run.current = null;
       run.waiting = [];
       ROUND_LAST_AT.set(id, Date.now());
+      /* 补发排队中的私聊回复：一轮只补一位，避免又堆成一串 */
+      const _q = DM_QUEUE.get(id);
+      if (_q && _q.length) {
+        const _nxt = _q.shift();
+        if (_q.length) DM_QUEUE.set(id, _q); else DM_QUEUE.delete(id);
+        setTimeout(function () { try { runRound(id, _nxt); } catch (e) {} }, 300);
+      }
     }
   })();
 
   return { ok: true, started: true, total: pool.length, order: pool };
 }
 
+/* ---------- 「现在要不要进提名阶段」：逐个问所有存活 AI，必须每位都表态 ----------
+   一次提议只问一遍，答过的记进 state.nomAgree；全员同意才提前进入提名阶段。 */
+async function askNomibationAgreement(id, opts) {
+  opts = opts || {};
+  const s = E.loadState(id);
+  const seats = s.seats || [];
+  const ask = [];
+  seats.forEach(function (x, i) {
+    if (!s.alive[i]) return;
+    if (x.type !== 'agent') return;
+    if (i === s.storytellerSeat) return;
+    ask.push(i);
+  });
+  const names = function (i) { return (i + 1) + ' 号 ' + ((seats[i] && seats[i].name) || ''); };
+  const detail = (opts.reason ? '有人提议现在进入提名阶段（' + String(opts.reason).slice(0, 60) + '）。' : '有人提议现在进入提名阶段。');
+  const out = [];
+  for (let k = 0; k < ask.length; k++) {
+    const seat = ask[k];
+    const route = routeFor(id, seat);
+    const prompt = [
+      '【现在有一个流程决定要你表态】' + detail,
+      '当前是第 ' + (s.day || 0) + ' 天白天。进入提名阶段后，每位存活玩家今天有一次提名权，通过投票可能处决一个人，然后立刻入夜。',
+      '请判断现在是否适合进入提名阶段：如果你还有话没说完、还想再听听别人的说法、或者觉得现在提名容易处决错人，就表示不同意；如果讨论得差不多了、或者你急着要处决某个人，就表示同意。',
+      '严格只输出一个 JSON 对象：{"think":"你的判断","agree":true 或 false,"say":"你在公聊里的一句话表态（20 字以内，自然点）"}',
+      stylePrompt(id)
+    ].join('\n');
+    let r = null;
+    try {
+      r = await Promise.race([
+        callModel({ game: id, seat: seat, prompt: prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model, maxTokens: 300 }),
+        new Promise(function (res) { setTimeout(function () { res({ error: '模型调用超时' }); }, MODEL_TIMEOUT_MS); })
+      ]);
+    } catch (e) { r = { error: String((e && e.message) || e) }; }
+    let agree = null, say = '';
+    if (r && !r.error) {
+      const p = parseReply(r.text);
+      const obj = (p && p.raw) || {};
+      if (typeof obj.agree === 'boolean') agree = obj.agree;
+      else if (/同意|可以|好啊|行|进提名|开吧/.test(String(p.say || ''))) agree = true;
+      else if (/不同意|再等等|先别|不用|不要/.test(String(p.say || ''))) agree = false;
+      say = String(p.say || '').trim();
+    }
+    if (agree === null) {
+      /* 拿不到明确答复时不阻塞流程：当成弃权（记同意），避免整局卡在这一次表态上 */
+      agree = true;
+      try { E.aiError(id, seat, '提名表态没有给出 agree 字段，按弃权处理'); } catch (e) {}
+    }
+    try { E.nomAgreeSet(id, seat, agree); } catch (e) {}
+    try { E.say(id, seat, (say || (agree ? '行，进提名吧。' : '我不同意现在进提名。')), 'town'); } catch (e) {}
+    out.push({ seat: seat, name: names(seat), agree: agree });
+  }
+  const st = E.nomAgreeState(id);
+  return { ok: true, answers: out, yes: st.yes, no: st.no, allAgree: out.every(function (x) { return x.agree; }) };
+}
 /* ---------- 说书人 Agent 主持一夜 / 一天 ---------- */
 async function runStoryteller(id, opts) {
   opts = opts || {};
@@ -1688,6 +1782,7 @@ async function drainStoryChat(id) {
 }
 
 module.exports = {
+  askNomibationAgreement,
   runNomination, nomStatus, buildNomPrompt,
   viewFor, viewForStoryteller, buildPrompt, buildStorytellerNightPrompt, buildStorytellerDayPrompt,
   parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
