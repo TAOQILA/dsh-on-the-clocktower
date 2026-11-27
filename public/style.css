@@ -214,6 +214,7 @@ body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 .msg .mtag{font-size:10px;font-weight:900;color:#0f0b1e;background:#9c8fe0;border-radius:5px;padding:0 5px;margin-right:4px;vertical-align:2px}
 .msg{margin-bottom:12px}
 .mtext{margin-top:4px}
+.selfpron{font-weight:900}
 .msg .mention{font-weight:900;background:transparent;padding:0}
 .center-badge .scriptline{font-size:13px;color:var(--parch);opacity:.85;margin:2px 0;letter-spacing:1px}
 /* ---- 原生滚动条太丑：统一换成细窄暗色滚动条 ---- */

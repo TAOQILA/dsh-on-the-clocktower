@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.3';
+var VERSION = '0.15.4';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -530,7 +530,7 @@ function bubHtml(m){
   var cached = (S.bubFont || {})[bkey];
   var fs = cached ? (' style="font-size:'+cached+'px"') : '';
   return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'"'+fs+' data-bkey="'+esc(bkey)+'" data-age="'+age.toFixed(1)+'">'+(isDm?'<span class="dmtag">私聊</span>':'')
-    + hlMentions(esc(m.text), seatLookup(S.game)) + toTxt + '</div>';
+    + colorSelfPronoun(hlMentions(esc(m.text), seatLookup(S.game)), senderColor(S.game, m.from)) + toTxt + '</div>';
 }
 function stBubbles(){
   if (S.showBubbles === false) return '';
@@ -1609,6 +1609,25 @@ function insertMention(name){
 }
 
 /* ---------- 消息渲染：按频道分开，公聊 / 私聊各一个侧栏 ---------- */
+/* 消息里的第一人称「我」按发送者上色：谁说的，就用谁的颜色（座位色 / 说书人金色）。
+   这样一眼就能看出这句话里的「我」指哪个人，不再是统一的正文色。 */
+function colorSelfPronoun(html, color){
+  if (!html) return html;
+  /* 只在标签之外替换，避免动到 style="..." / class="..." 里的内容 */
+  var parts = String(html).split(/(<[^>]*>)/g);
+  for (var i = 0; i < parts.length; i++){
+    if (parts[i].charAt(0) === '<') continue;
+    parts[i] = parts[i].replace(/我/g, '<span class="selfpron" style="color:'+color+'">我</span>');
+  }
+  return parts.join('');
+}
+function senderColor(g, from){
+  if (from === 'storyteller') return '#d9b66a';
+  if (from === 'admin') return '#8fd3ff';
+  var n = Number(from);
+  if (!isFinite(n) || n < 0) return 'inherit';
+  return seatColor(n);
+}
 function chatMsgsHtml(g, channel, peer){
   if (!g) return '<div class="muted">暂无消息</div>';
   var seats = g.seats || [];
@@ -1638,7 +1657,7 @@ function chatMsgsHtml(g, channel, peer){
       }).join('、') + '</span>';
     }
     return '<div class="msg ' + cls + '"><span class="who">' + who + '</span>' + tag + toTxt
-      + '<div class="mtext">' + hlMentions(esc(m.text), lk) + '</div></div>';
+      + '<div class="mtext">' + colorSelfPronoun(hlMentions(esc(m.text), lk), senderColor(g, m.from)) + '</div></div>';
   }).join('');
   return h || '<div class="muted">' + (channel === 'private' ? '还没有私聊。' : '暂无消息') + '</div>';
 }
