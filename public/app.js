@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.4';
+var VERSION = '0.13.5';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -859,7 +859,7 @@ function seatPanel(seats,sel){
 function storyPanel(seats,sel,roles,phase){
   if (!S.game) return '<p class="muted">请先在「建局」中创建对局。</p>';
   if (S.game.win && S.game.win.over) return '<p class="muted">本局已结束。可到「日志」里回看，或在「建局」里开新局。</p>';
-  if (!iAmStoryteller(S.game)) return '<div class="section"><h3>说书人</h3><p class="muted">本局说书人由 Agent「'+S.game.storyteller.name+'」担任，你没有主持人权限。</p></div>'+ agentStorySection() + (canControl() ? agentEndRow() : '');
+  if (!iAmStoryteller(S.game)) return '<div class="section"><h3>说书人</h3><p class="muted">本局说书人由 Agent「'+S.game.storyteller.name+'」担任，你没有主持人权限。若要结束本局，请到「作弊」页操作。</p></div>'+ agentStorySection();
   return humanStoryPanel(seats,sel,roles,phase) + agentEndRow();
 }
 /* 说书人为 Agent 时：让 Agent 主持夜晚/白天 */
