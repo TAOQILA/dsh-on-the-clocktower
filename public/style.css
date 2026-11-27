@@ -396,6 +396,8 @@ body.night .nomgate{background:rgba(156,143,224,.12);border-color:rgba(156,143,2
 .compitem b{margin-left:3px;font-size:14px;font-weight:900;vertical-align:-1px}
 body.night .compitem{opacity:.85}
 
+.adminbadge{background:#1d4d6b;color:#cdeaff;border:1px solid #3d7ea6}
+body.night .adminbadge{background:#22335c;color:#cfe0ff;border-color:#4a5f9a}
 /* 私聊：微信式的会话列表 + 单个对话（一个框整体替换，不是筛选） */
 .dmlist{flex:1;overflow-y:auto;padding:4px 2px}
 .dmconv{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:9px;cursor:pointer;transition:background .15s ease}

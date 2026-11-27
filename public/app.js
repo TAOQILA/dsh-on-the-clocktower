@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.6';
+var VERSION = '0.15.7';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1684,7 +1684,9 @@ function chatMsgsHtml(g, channel, peer){
   var h = list.map(function(m){
     var who = (m.from === 'storyteller')
       ? stBadge(stName)
-      : seatBadge(m.from, seats[m.from] ? seats[m.from].name : '');
+      : (m.from === 'admin'
+        ? '<span class="badge adminbadge">管理员</span>'
+        : seatBadge(m.from, seats[m.from] ? seats[m.from].name : ''));
     var cls = m.channel === 'private' ? 'dm' : 'town';
     var tag = m.channel === 'private' ? '<span class="mtag">私聊</span>' : '';
     var toTxt = '';
