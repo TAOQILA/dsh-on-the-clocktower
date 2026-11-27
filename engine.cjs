@@ -2328,6 +2328,11 @@ Object.assign(NIGHT_KIND, {
   "官员": "choice", "窃贼": "choice", "侍女": "choice", "筑梦师": "choice", "女裁缝": "choice"
 });
 /* 按标准顺序生成当夜清单 */
+function nStarRole(name){
+  const info=roleInfoByName(name);
+  const ab=String((info && info.ability) || "");
+  return /每个夜晚\s*[*＊]/.test(ab) || /夜晚时\s*[*＊]/.test(ab);
+}
 function nightBuildRun(s){
   const d=nightOrderData();
   const isFirst=Number(s.night||1)<=1;
@@ -2340,6 +2345,8 @@ function nightBuildRun(s){
   };
   seq.forEach(function(name){
     if(name==="爪牙信息"||name==="恶魔信息") return;
+    /* 「每个夜晚*」的角色首个夜晚不发动（亡骨魔、刺客、教授等），不能被顺序表误唤醒 */
+    if(isFirst && nStarRole(name)){ delete present[name]; return; }
     const list=present[name]; if(!list) return;
     list.forEach(function(seat){ pushStep(name, seat); });
     delete present[name];
@@ -2389,6 +2396,13 @@ function nightExec(id){
   });
   const step=run.steps.filter(function(x){ return x.status==="pending"; })[0];
   if(!step){
+    /* 还有步骤在等玩家回答（上一轮回答不合法）：重新把问题发一遍，不能当作流程结束 */
+    const waiting=run.steps.filter(function(x){ return x.status==="await"; })[0];
+    if(waiting){
+      const hw=NIGHT_CHOOSE[waiting.role];
+      saveState(id,s);
+      return { ok:true, kind:"ask", step:waiting, prompt:(hw&&hw.prompt)||"请告诉我你想选择的目标（回复座位号）。" };
+    }
     run.finished=true; saveState(id,s);
     let ch=null;
     if(s.phase==="night"||s.phase==="dawn"){ ch=setPhase(id,"day"); }
@@ -2396,6 +2410,12 @@ function nightExec(id){
   }
   const kind=NIGHT_KIND[step.role]||"st";
   step.mode=kind;
+  /* 「每个夜晚*」的角色首个夜晚不发动（顺序表与 first_night 标记都可能误收录） */
+  if (Number(s.night || 1) <= 1 && nStarRole(step.role)) {
+    step.status = "skipped"; step.note = "「每个夜晚*」的角色首个夜晚不发动";
+    saveState(id, s);
+    return { ok:true, kind:"skip", step:step };
+  }
   const _sk = NIGHT_SKIP[step.role];
   if (_sk) {
     let why = "";
@@ -2444,6 +2464,15 @@ function nightAnswer(id, seat, text){
   const seats=nightParseSeats(s, text);
   const h=NIGHT_CHOOSE[step.role];
   if(!h) return { ok:false, error:"这一步不能由玩家回答" };
+  const _refuse = /不选|不进行|不发动|不杀|放弃|跳过|没有目标|今夜没有|今晚不|算了/.test(String(text || ""));
+  if(!seats.length && _refuse){
+    const _sR = loadState(id);
+    const _stR = (_sR.nightRun.steps || []).filter(function(x){ return x.key === step.key; })[0];
+    if (_stR) { _stR.status = "skipped"; _stR.note = "（玩家表示今晚不使用能力）"; }
+    saveState(id, _sR);
+    giveInfo(id, Number(seat), "明白，你今晚不使用这项能力。");
+    return { ok:true, text:"（不使用能力）" };
+  }
   if(!seats.length && h.optional && /不选|跳过|放弃|不用|算了/.test(String(text||""))){
     step.status="done"; step.note="（玩家选择不使用能力）";
     giveInfo(id, Number(seat), "你今晚选择了不使用能力。");

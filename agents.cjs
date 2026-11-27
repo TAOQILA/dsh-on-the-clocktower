@@ -1330,8 +1330,9 @@ async function nightDriver(id, run){
       try { runRound(id, { seats: [seat], replyTo: "storyteller" }); } catch (e) {}
       const ok = await waitNightAnswer(id, seat, before);
       if (!ok) {
-        E.log(id, "系统", "等待 " + (seat + 1) + " 号回答「" + r.step.role + "」超时，夜间流程暂停（可以再点一次主持继续）", true);
-        break;
+        E.log(id, "系统", "等待 " + (seat + 1) + " 号回答「" + r.step.role + "」超时，视为放弃这一步，流程继续", true);
+        try { E.nightMarkDone(id, r.step.key, "（玩家超时未回答，视为放弃）"); } catch (e) {}
+        continue;
       }
       applied.info++;
       continue;
