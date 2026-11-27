@@ -2430,6 +2430,14 @@ function nightExec(id){
     if(s.phase==="night"||s.phase==="dawn"){ ch=setPhase(id,"day"); }
     return { ok:true, kind:"done", phase:(ch&&ch.ok&&ch.state)?ch.state.phase:(ch&&ch.phase)||s.phase };
   }
+  /* 规则：夜间行动按顺序进行，玩家若在自己被唤醒之前已经死亡，就不再被唤醒。
+     守鸦人是「死亡时」触发的例外，它的步骤由上面的动态补步产生，不在此跳过。 */
+  if(!s.alive[step.seat] && step.role!=="守鸦人"){
+    step.status="skipped"; step.note="本夜在此之前已经死亡，不再被唤醒";
+    saveState(id,s);
+    log(id,"说书人",nSeatLabel(s,step.seat)+" 的【"+step.role+"】因本夜已经死亡，跳过唤醒",true);
+    return { ok:true, kind:"skip", step:step };
+  }
   const kind=NIGHT_KIND[step.role]||"st";
   step.mode=kind;
   /* 「每个夜晚*」的角色首个夜晚不发动（顺序表与 first_night 标记都可能误收录） */
@@ -2523,21 +2531,30 @@ function jugglerFromChat(id, seat, text){
 function nightAnswer(id, seat, text){
   const s=nightEnsure(id);
   const step=(s.nightRun.steps||[]).filter(function(x){ return x.status==="await" && Number(x.seat)===Number(seat); })[0];
-  if(!step) return { ok:false, error:"现在没有在等你的选择" };
+  if(!step){
+    /* 这一步已经结算过（玩家又补发了一条），不必再用「现在没有在等你的选择」打扰他 */
+    const mine=(s.nightRun.steps||[]).filter(function(x){ return Number(x.seat)===Number(seat); });
+    if(mine.length) return { ok:true, ignored:true };
+    return { ok:false, error:"现在没有在等你的选择" };
+  }
   const seats=nightParseSeats(s, text);
   const h=NIGHT_CHOOSE[step.role];
   if(!h) return { ok:false, error:"这一步不能由玩家回答" };
+  /* 确认语必须在结果信息之前落库：否则玩家先看到「你得知…」，再说「收到」，读起来像倒放 */
+  const ack=function(){ try{ say(id,"storyteller","收到，已经按你的选择结算。","private",[Number(seat)]); }catch(e){} };
   const _refuse = /不选|不进行|不发动|不杀|放弃|跳过|没有目标|今夜没有|今晚不|算了/.test(String(text || ""));
   if(!seats.length && _refuse){
     const _sR = loadState(id);
     const _stR = (_sR.nightRun.steps || []).filter(function(x){ return x.key === step.key; })[0];
     if (_stR) { _stR.status = "skipped"; _stR.note = "（玩家表示今晚不使用能力）"; }
     saveState(id, _sR);
+    ack();
     giveInfo(id, Number(seat), "明白，你今晚不使用这项能力。");
     return { ok:true, text:"（不使用能力）" };
   }
   if(!seats.length && h.optional && /不选|跳过|放弃|不用|算了/.test(String(text||""))){
     step.status="done"; step.note="（玩家选择不使用能力）";
+    ack();
     giveInfo(id, Number(seat), "你今晚选择了不使用能力。");
     saveState(id,s);
     return { ok:true, text:"（不使用能力）" };
@@ -2552,6 +2569,7 @@ function nightAnswer(id, seat, text){
   if (seats.length < _need) return { ok:false, retry:true, error:"这一步需要选 " + _need + " 名玩家，你只给了 " + seats.length + " 个，请补齐。" };
   const r=h.resolve(id, s, Number(seat), seats, String(text||""));
   if(r && r.error) return { ok:false, error:r.error };
+  ack();
   giveInfo(id, Number(seat), r.text);
   const _sC = loadState(id);
   const _stC = (_sC.nightRun.steps || []).filter(function(x){ return x.status === "await" && Number(x.seat) === Number(seat); })[0];

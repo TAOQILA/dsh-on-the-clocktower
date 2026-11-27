@@ -142,9 +142,15 @@ function buildApi(opts){
           E.say(b.id, 'storyteller', na.error, 'private', [Number(b.seat)]);
           return { ok: true, night: true, retry: true, error: na.error };
         }
+        if (na && na.ok && na.ignored) {
+          /* 这一步已经结算过，玩家又补发了一条：留档但不再回「现在没有在等你的选择」 */
+          saveOwn();
+          return { ok: true, night: true };
+        }
         if (na && na.ok) {
           saveOwn();
-          E.say(b.id, 'storyteller', '收到，已经按你的选择结算。', 'private', [Number(b.seat)]);
+          /* 「收到，已经按你的选择结算。」改由 engine.nightAnswer 在给结果之前发出，
+             保证玩家看到的是「确认 → 信息」，而不是「信息 → 确认」。 */
           /* 答案一落库，夜间流程要立刻接着往下走：
              否则玩家答完这一步，流程还停在原地，看起来就像卡死了（m11812）。 */
           try { const sN = E.loadState(b.id); if (sN.phase === 'night' && sN.nightRun && !sN.nightRun.finished) A.runStoryteller(b.id, {}); } catch (e) {}
