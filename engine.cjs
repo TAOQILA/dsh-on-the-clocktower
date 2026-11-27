@@ -47,6 +47,8 @@ function createGame(cfg){
     roles: {}, apparentRoles: {}, alignment: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [], nightDeaths: [],
     shields: {}, abilityUsed: {}, granted: {}, winBlocks: [], extra: {},
     nomCfg: Object.assign({ min: 15, softMax: 45, hardMax: 80, unanimous: true }, cfg.nomCfg || {}),
+    /* 每位玩家自己维护的「我要提名谁」清单：白天随时可改，进提名阶段直接按清单执行 */
+    nomIntents: {},
     log: [], readAcks: []
   };
   cfg.seats.forEach((s,i)=>{
@@ -93,6 +95,12 @@ function start(id){
   s.phase='night'; s.night=1; s.turn=1;
   saveState(id,s); log(id,'系统','第一夜开始');
   return {ok:true, state:s};
+}
+/* 轻量阶段查询：前端 1 秒级轮询用它判断「是不是该重绘」，不用整份 state */
+function phaseInfo(id){
+  const s = loadState(id);
+  return { ok:true, id:id, phase:s.phase, day:s.day||0, night:s.night||0,
+    alive:(s.alive||[]).slice(), win:(s.win||null) };
 }
 function setPhase(id, phase){
   const s = loadState(id);
@@ -403,10 +411,13 @@ function say(id, seat, text, channel, to){
     const toSt = seat==='storyteller' || targets.indexOf('storyteller')>=0;
     if (!toSt) return { ok:false, error:'夜晚禁止玩家间私聊，只可与说书人私聊' };
   }
-  /* 正式处理一项提名时（被提名发言 / 投票 / 读票），只有提名者、被提名者和说书人可以公开发言 */
-  if (ch==='town' && (s.phase==='nomination' || s.phase==='vote') && s.nom && s.nom.cur) {
+  /* 正式处理一项提名时（提名理由 / 被提名发言 / 投票 / 读票 / 宣布结果），
+     只有提名者、被提名者和说书人可以公开发言。
+     判据挂在「当前这一项提名」上而不是 phase 上：提名可能从白天公聊直接发起，
+     phase 未必立刻变成 nomination，只按 phase 判会漏掉。 */
+  if (ch==='town' && s.nom && s.nom.cur) {
     const st0 = String(s.nom.stage || '');
-    if (st0==='defense' || st0==='vote' || st0==='clock') {
+    if (st0==='announce' || st0==='reason' || st0==='defense' || st0==='vote' || st0==='clock' || st0==='result') {
       const okSeat = (seat==='storyteller')
         || (Number(seat)===Number(s.nom.cur.from))
         || (Number(seat)===Number(s.nom.cur.target));
@@ -430,13 +441,16 @@ function say(id, seat, text, channel, to){
   return {ok:true, message:msg};
 }
 /* 管理员私聊说书人：以 from='admin' 的身份投递一条私聊，只有说书人能看到 */
-function adminSay(id, text, seat){
+function adminSay(id, text, seat, exec){
   const s = loadState(id);
   if (!Array.isArray(s.messages)) s.messages = [];
   /* adminSeat 记住是哪个座位下达的指令，这样说书人的回答能回到他手里，
-     而其他玩家看不到这条指令，也看不到回答的内容 */
+     而其他玩家看不到这条指令，也看不到回答的内容。
+     exec 是系统已经直接执行掉的确定性操作结果（处决/杀死/复活/改角色/终局…），
+     说书人回答时必须照这份真实状态说，不能凭印象编。 */
   const msg = { t:new Date().toISOString(), from:'admin', channel:'private', to:['storyteller'],
-    text:String(text||''), adminSeat:(seat===undefined||seat===null||seat==='storyteller')?null:Number(seat) };
+    text:String(text||''), adminSeat:(seat===undefined||seat===null||seat==='storyteller')?null:Number(seat),
+    exec:(exec && exec.handled) ? exec : null };
   s.messages.push(msg);
   saveState(id, s);
   log(id, '管理员', '[私聊说书人] ' + msg.text);
@@ -899,8 +913,11 @@ function nomNext(id){
   const n = s.seats.length;
   const order = [];
   for (let k = 1; k <= n; k++) order.push((q.from + k) % n);
-  s.nom.cur = { from:q.from, target:q.target, reason:String(q.reason||''), defense:'', hands:{}, order:order, ptr:-1, yes:[], no:[], passed:false, votes:0, startedAt:new Date().toISOString() };
-  s.nom.stage = 'reason';
+  /* 提名流程是有仪式顺序的：① 只宣告「X 提名 Y」② 说书人请提名者说明理由 ③ 听理由
+     ④ 说书人请被提名者反驳 ⑤ 才开始投票。所以这里把提名者想说的理由先存成 reasonHint，
+     不公开，等下一阶段被点名时才由他本人说出来。 */
+  s.nom.cur = { from:q.from, target:q.target, reasonHint:String(q.reason||''), reason:'', defense:'', hands:{}, order:order, ptr:-1, yes:[], no:[], passed:false, votes:0, startedAt:new Date().toISOString() };
+  s.nom.stage = 'announce';
   saveState(id, s);
   log(id, '说书人', '处理提名：'+(q.from+1)+' 号 提名 '+(q.target+1)+' 号', true);
   return { ok:true, cur:s.nom.cur, stage:s.nom.stage };
@@ -910,7 +927,7 @@ function nomSpeech(id, kind, text){
   if (!s.nom.cur) return { ok:false, error:'当前没有提名' };
   const k = (kind === 'defense') ? 'defense' : 'reason';
   s.nom.cur[k] = String(text||'');
-  if (k === 'reason') { s.nom.stage = 'defense'; }
+  if (k === 'reason') { s.nom.stage = 'defense'; }  /* 理由说完 → 交给被提名者反驳 */
   else { s.nom.stage = 'vote'; }
   saveState(id, s);
   return { ok:true, stage:s.nom.stage };
@@ -1279,6 +1296,128 @@ function resetDeadVotes(id){
   return { ok:true };
 }
 /* 说书人回包里的通用操作分发：逐条执行并汇总 */
+/* ---------- 管理员自然语言指令 → 真实引擎操作 ----------
+   历史事故：管理员说「立即处决@6」，说书人只是在聊天里写了一句「6 号被处决」，
+   引擎里什么都没发生，玩家随后发现 6 号还活着。凡是能被确定性解析的指令，
+   一律在这里直接执行，不再指望模型自己记得去调用接口。 ---------- */
+function seatFromText(s, txt, fallback){
+  const t = String(txt || '');
+  const seats = (s && s.seats) || [];
+  let hit = -1;
+  seats.map(function (x, i) { return { i:i, n:String((x && x.name) || '') }; })
+    .filter(function (x) { return x.n; })
+    .sort(function (a, b) { return b.n.length - a.n.length; })
+    .forEach(function (x) { if (hit < 0 && t.indexOf(x.n) >= 0) hit = x.i; });
+  if (hit < 0) { const m = t.match(/(\d{1,3})\s*号?/); if (m) { const k = Number(m[1]) - 1; if (k >= 0 && k < seats.length) hit = k; } }
+  if (hit < 0 && fallback != null) { const k = Number(fallback); if (k >= 0 && k < seats.length) hit = k; }
+  return hit;
+}
+function adminExecute(id, text){
+  const s = loadState(id);
+  const t = String(text || '').trim();
+  if (!t) return { ok:false, handled:false };
+  /* 问句不要执行：管理员问「为什么处决了 3 号」「6 号是不是没死」时只是在提问，
+     这类话交给说书人回答，不要当成指令去改状态。 */
+  if (/[?？]\s*$/.test(t) || /^(请问|问一下|为什么|为何|怎么|是不是|是否|有没有)/.test(t)) return { ok:false, handled:false };
+  const done = [];
+  const replies = [];
+  const nm = function (seat) { return (seat + 1) + ' 号 ' + ((s.seats[seat] || {}).name || ''); };
+
+  /* 终局 */
+  if (/终局|结束(游戏|对局)|宣布(胜利|结果)/.test(t) && !/不许|不要|取消/.test(t)) {
+    const side = /邪恶/.test(t) ? 'evil' : (/善良/.test(t) ? 'good' : null);
+    if (side) {
+      const r = endGame(id, side, '管理员宣布终局');
+      return { ok:true, handled:true, side:side, win:r.win,
+        summary:'已宣布终局：' + (side === 'evil' ? '邪恶阵营胜利' : '善良阵营胜利') + '。' };
+    }
+  }
+  /* 处决 */
+  if (/处决/.test(t)) {
+    const seat = seatFromText(s, t, null);
+    if (seat >= 0) {
+      const r = execute(id, seat);
+      done.push('execute');
+      replies.push(r && r.ok ? (r.win ? ('处决了 ' + nm(seat) + '；' + (r.win.side === 'evil' ? '邪恶阵营胜利' : '善良阵营胜利')) : ('已处决 ' + nm(seat) + '。')) : ('处决失败：' + ((r && r.error) || '未知原因')));
+    }
+  }
+  /* 杀死（不处决） */
+  if (/杀死|杀掉|干掉|击杀|夜里死|让他死|让她死/.test(t) && !/处决/.test(t)) {
+    const seat = seatFromText(s, t, null);
+    if (seat >= 0) {
+      const night = /夜|今晚/.test(t);
+      const r = kill(id, seat, '管理员指令', { night:night });
+      done.push('kill');
+      replies.push(r && r.ok ? ('已杀死 ' + nm(seat) + '。') : ('杀死失败：' + ((r && r.error) || '未知原因')));
+    }
+  }
+  /* 复活 */
+  if (/复活|救活|活过来|恢复存活/.test(t)) {
+    const seat = seatFromText(s, t, null);
+    if (seat >= 0) {
+      const r = revive(id, seat, { reason:'管理员指令' });
+      done.push('revive');
+      replies.push(r && r.ok ? ('已复活 ' + nm(seat) + '。') : ('复活失败：' + ((r && r.error) || '未知原因')));
+    }
+  }
+  /* 改角色：把 N 号改成 XX */
+  const mr = t.match(/(?:把|将)?\s*(\d{1,3})\s*号?(?:的)?(?:角色)?\s*(?:改|换|设|变)(?:成|为|作)?\s*([^\s，。,.]+)/);
+  if (mr) {
+    const seat = Number(mr[1]) - 1;
+    const role = String(mr[2] || '').replace(/[。，,]$/, '');
+    if (seat >= 0 && seat < s.seats.length && role) {
+      const r = forceRole(id, seat, role, { silent:false });
+      done.push('role');
+      replies.push(r && r.ok ? ('已把 ' + nm(seat) + ' 的角色改为 ' + role + '。') : ('改角色失败：' + ((r && r.error) || '未知原因')));
+    }
+  }
+  /* 改阵营：N 号是邪恶/善良 */
+  const ma = t.match(/(\d{1,3})\s*号?[^。，,]{0,6}(邪恶|善良)/);
+  if (ma && /阵营|归属|算(作|是)/.test(t)) {
+    const seat = Number(ma[1]) - 1;
+    const v = ma[2] === '邪恶' ? 'evil' : 'good';
+    if (seat >= 0 && seat < s.seats.length) {
+      const r = setAlignment(id, seat, v);
+      done.push('align');
+      replies.push(r && r.ok ? ('已把 ' + nm(seat) + ' 的阵营改为' + (v === 'evil' ? '邪恶' : '善良') + '。') : '改阵营失败。');
+    }
+  }
+  /* 免死 / 取消免死 */
+  if (/免死|不死|挡下|保护/.test(t) && !/取消|解除/.test(t)) {
+    const seat = seatFromText(s, t, null);
+    if (seat >= 0) { setShield(id, seat, '管理员指令'); done.push('shield'); replies.push('已让 ' + nm(seat) + ' 本轮免死。'); }
+  }
+  if (/取消免死|解除免死|解除保护/.test(t)) {
+    const seat = seatFromText(s, t, null);
+    if (seat >= 0) { clearShield(id, seat); done.push('unshield'); replies.push('已解除 ' + nm(seat) + ' 的免死。'); }
+  }
+  /* 阶段推进 */
+  if (/进入白天|到白天|天亮了|推进到白天/.test(t)) { setPhase(id, 'day'); done.push('phase:day'); replies.push('已进入白天。'); }
+  else if (/进入夜晚|到夜晚|天黑了|推进到夜晚/.test(t)) { setPhase(id, 'night'); done.push('phase:night'); replies.push('已进入夜晚。'); }
+  else if (/进入提名|开始提名|提名阶段/.test(t)) { setPhase(id, 'nomination'); done.push('phase:nomination'); replies.push('已进入提名阶段。'); }
+
+  if (!done.length) return { ok:false, handled:false };
+  return {
+    ok:true, handled:true,
+    ops:done,
+    summary: replies.join(' '),
+    /* 执行后的真实状态快照，回答管理员时必须用这份，而不是凭记忆 */
+    snapshot: adminSnapshot(id)
+  };
+}
+/* 真实状态快照：管理员问「谁还活着」这类问题必须照这份答 */
+function adminSnapshot(id){
+  const s = loadState(id);
+  const seats = (s.seats || []).map(function (x, i) {
+    return (i + 1) + ' 号 ' + x.name + (s.alive[i] ? '（存活）' : '（已死亡）') + ' 角色=' + ((s.roles && s.roles[i]) || '未分配');
+  });
+  return {
+    phase: s.phase, night: s.night, day: s.day,
+    win: s.win || null,
+    seats: seats
+  };
+}
+
 function applyOps(id, ops){
   const out = { roleChanges:0, revives:0, kills:0, executes:0, shields:0, aligns:0, apparent:0, grants:0, swaps:0, markers:0, wins:0, exiles:0, extra:0 };
   if (!Array.isArray(ops)) return out;
@@ -1411,26 +1550,113 @@ function nomTryFromChat(id, from, text){
   if (!t) return { ok:false, handled:false };
   if (!/提名/.test(t)) return { ok:false, handled:false };
   if (/不提名|别提名|不要提名|没有提名|没人提名|暂不提名|不打算提名|先不提名/.test(t)) return { ok:false, handled:false };
-  const me = Number(from);
-  if (!(me >= 0 && me < (s.seats||[]).length)) return { ok:false, handled:false };
-  const seats = s.seats || [];
+  /* 只是「确认 / 询问 / 讨论」提到提名的，不当成真的发起提名：
+     例如「@3 对本人的提名是否已登记」「请确认刚才的提名」这类话不能凭空造出一项提名。 */
+  if (/(是否|有没有|确认|登记|已登|请问|问一下|能不能|可不可以)/.test(t)
+      && !/(我要|我来|我发起|我现在|正式提名|发起提名|我提名)/.test(t)) return { ok:false, handled:false };
+  /* 提名者：默认是发这条消息的人；但如果他说的是「@3 提名 @6」「3 号提名 6 号」，
+     那是替某个座位报出提名（真人玩家常这么招呼说书人），提名者就是被点到的那个座位。 */
+  let me = Number(from);
+  const seats0 = s.seats || [];
+  (function () {
+    let who = -1;
+    const mNum = t.match(/(\d{1,2})\s*号?\s*(?:要|来|去)?\s*提名/);
+    if (mNum) { const k = Number(mNum[1]) - 1; if (k >= 0 && k < seats0.length) who = k; }
+    if (who < 0) {
+      seats0.map(function (x, i) { return { i:i, n:String((x && x.name) || '') }; })
+        .filter(function (x) { return x.n; })
+        .sort(function (a, b) { return b.n.length - a.n.length; })
+        .forEach(function (x) { if (who < 0 && new RegExp('@' + x.n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(?:要|来|去)?\\s*提名').test(t)) who = x.i; });
+    }
+    if (who >= 0) me = who;
+  })();
+  if (!(me >= 0 && me < seats0.length)) return { ok:false, handled:false };
+  /* 目标：优先取「提名」之后的那个座位，避免把提名者自己误当目标 */
+  const after = (function () { const k = t.search(/提名/); return k >= 0 ? t.slice(k) : t; })();
   let target = -1;
-  /* ① @昵称（长名优先，避免「小明」抢在「小明明」前面） */
-  seats.map(function(x,i){ return { i:i, n:String((x&&x.name)||'') }; })
-    .filter(function(x){ return x.n; })
-    .sort(function(a,b){ return b.n.length - a.n.length; })
-    .forEach(function(x){ if (target < 0 && t.indexOf('@' + x.n) >= 0) target = x.i; });
-  /* ② 「N 号」/「N号」 */
-  if (target < 0) {
-    const m = t.match(/(\d{1,2})\s*号/);
-    if (m) { const k = Number(m[1]) - 1; if (k >= 0 && k < seats.length) target = k; }
-  }
+  (function () {
+    /* ① @昵称（长名优先） */
+    seats0.map(function (x, i) { return { i:i, n:String((x && x.name) || '') }; })
+      .filter(function (x) { return x.n; })
+      .sort(function (a, b) { return b.n.length - a.n.length; })
+      .forEach(function (x) { if (target < 0 && after.indexOf('@' + x.n) >= 0) target = x.i; });
+    /* ② 「N 号」/「N号」 */
+    if (target < 0) { const m = after.match(/(\d{1,2})\s*号/); if (m) { const k = Number(m[1]) - 1; if (k >= 0 && k < seats0.length) target = k; } }
+    /* ③ 直接写座位号（如「我提名 6」） */
+    if (target < 0) { const m2 = after.match(/提名\s*@?\s*(\d{1,2})\b/); if (m2) { const k = Number(m2[1]) - 1; if (k >= 0 && k < seats0.length) target = k; } }
+    /* ④ 直接写昵称 */
+    if (target < 0) {
+      seats0.map(function (x, i) { return { i:i, n:String((x && x.name) || '') }; })
+        .filter(function (x) { return x.n && x.n.length >= 1; })
+        .sort(function (a, b) { return b.n.length - a.n.length; })
+        .forEach(function (x) { if (target < 0 && after.indexOf(x.n) >= 0) target = x.i; });
+    }
+  })();
   if (target < 0) return { ok:false, handled:false, error:'没看出你要提名谁：请写「我提名 N 号」或「我提名 @昵称」' };
   /* 进入提名阶段（白天才允许） */
   if (s.phase === 'day') { try { setPhase(id, 'nomination'); } catch (err) {} }
   const r = nomPropose(id, me, target, t);
   if (r && r.ok) return { ok:true, handled:true, target:target, queue:r.queue };
   return { ok:false, handled:true, error:(r && r.error) || '提名失败' };
+}
+
+/* ---------- 提名意向清单 ----------
+   每位存活玩家维护一个「我今天想提名谁」的清单（可为空、可多选、按优先级排序）。
+   平时聊天里可以随时改，进提名阶段时直接照清单执行，不用再现场问一遍。 */
+function nomIntents(id){
+  const s = loadState(id);
+  if (!s.nomIntents || typeof s.nomIntents !== 'object') { s.nomIntents = {}; saveState(id, s); }
+  return s.nomIntents;
+}
+function nomSetIntent(id, seat, targets){
+  const s = loadState(id);
+  if (!s.nomIntents || typeof s.nomIntents !== 'object') s.nomIntents = {};
+  seat = Number(seat);
+  if (!(seat >= 0 && seat < (s.seats || []).length)) return { ok:false, error:'座位号不合法' };
+  let arr = [];
+  if (Array.isArray(targets)) arr = targets;
+  else if (typeof targets === 'string') arr = targets.split(/[,\s、，]+/);
+  arr = arr.map(Number).filter(function (n) { return n >= 1 && n <= (s.seats || []).length; });
+  /* 去重、保持顺序 */
+  const uniq = [];
+  arr.forEach(function (n) { if (uniq.indexOf(n) < 0) uniq.push(n); });
+  s.nomIntents[seat] = uniq;
+  saveState(id, s);
+  log(id, '系统', (seat+1) + ' 号更新了提名清单：' + (uniq.length ? uniq.join('、') + ' 号' : '（空）'), true);
+  return { ok:true, seat:seat, targets:uniq };
+}
+/* 从某人的提名清单里取出「下一个还能提名的人」：
+   跳过已经出局的、以及今天已经被提名过（usedTarget）的人。返回 1 起的座位号，没有可用目标返回 0。 */
+function nomPickIntent(id, seat){
+  const s = loadState(id);
+  const list = (s.nomIntents && s.nomIntents[Number(seat)]) || [];
+  const used = (s.nom && s.nom.usedTarget) || {};
+  for (let k = 0; k < list.length; k++) {
+    const n = Number(list[k]);
+    if (!(n >= 1 && n <= (s.seats || []).length)) continue;
+    if (!s.alive[n - 1]) continue;
+    if (used[n - 1]) continue;
+    return n;
+  }
+  return 0;
+}
+/* 用掉清单里的一个目标（发起提名成功后调用），把这个人从清单里摘掉 */
+function nomDropIntent(id, seat, target){
+  const s = loadState(id);
+  if (!s.nomIntents) s.nomIntents = {};
+  const cur = s.nomIntents[Number(seat)] || [];
+  s.nomIntents[Number(seat)] = cur.filter(function (x) { return Number(x) !== Number(target); });
+  saveState(id, s);
+  return { ok:true, targets:s.nomIntents[Number(seat)] };
+}
+
+function nomClearIntents(id, seat){
+  const s = loadState(id);
+  if (!s.nomIntents) s.nomIntents = {};
+  if (seat === undefined || seat === null) s.nomIntents = {};
+  else delete s.nomIntents[Number(seat)];
+  saveState(id, s);
+  return { ok:true };
 }
 
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
@@ -1440,6 +1666,6 @@ module.exports = { createGame, createAndStart, setSeatModel, loadState, saveStat
   evilInfoFor, bluffRoles, dealEvilInfo,
   voteWeight, secretBallot, butlerMaster, abilityOfSeat, isEvilSeat,
   revive, forceRole, setApparent, setAlignment, setShield, clearShield, markUsed, isUsed, swapSeats, setMarker, clearMarker,
-  grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf,
+  grantAbility, onDeathHooks, exile, addSeat, resetNomination, resetDeadVotes, applyOps, alignOf, apparentOf, trueRoleOf, nomIntents, nomSetIntent, nomClearIntents, nomPickIntent, nomDropIntent,
   nomState, nomPropose, nomNext, nomSpeech, nomHand, nomClockBegin, nomTick, nomResolve, nomClose, nomReset, nomNewDay, nomSetBusy, nomMarkAsked, nomEnsure, nomFinish, nomSkip, nomSetStage, nomClearAsked,
-  dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat };
+  adminExecute, adminSnapshot, dayPublicCount, allAgreeNominate, nomGate, setNomCfg, nomCfgOf, NOM_CFG_DEFAULT, nomTryFromChat };

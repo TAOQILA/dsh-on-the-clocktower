@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.7';
+var VERSION = '0.15.9';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, dmView:'list', nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
+  showThinking:true, storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false, dmUnreadBy:{}, bubFont:{}, dmView:'list', nomPolling:false, nom:null, nomRun:null, nomBusy:false, nomReason:'', nomTarget:0,
   nomCfgMin:15, nomCfgSoftMax:45, nomCfgHardMax:80, nomCfgUnanimous:true, nomGate:null, autoNomStarted:'' };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
@@ -75,6 +75,7 @@ function savePrefs(){
       chatFade: S.chatFade !== false,
       showTimer: S.showTimer !== false,
       showBubbles: S.showBubbles !== false,
+      showThinking: S.showThinking !== false,
       nightTheme: S.nightTheme !== false,
       showScriptLine: S.showScriptLine !== false,
       hideSide: S.hideSide === true,
@@ -107,6 +108,7 @@ function loadPrefs(){
     if (typeof o.bgOn === 'boolean') S.bgOn = o.bgOn;
     if (typeof o.bgBlur === 'number' && isFinite(o.bgBlur)) S.bgBlur = o.bgBlur;
     if (typeof o.bgBright === 'number' && isFinite(o.bgBright)) S.bgBright = o.bgBright;
+    if (typeof o.showThinking === 'boolean') S.showThinking = o.showThinking;
     if (typeof o.autoChat === 'boolean') S.autoChat = o.autoChat;
     if (typeof o.autoStory === 'boolean') S.autoStory = o.autoStory;
     S.storyName = o.storyName || '说书人';
@@ -396,6 +398,7 @@ function render(force){
         ))+
         '</div>'+
       '</div></div>' +
+      nomVoteOverlay() +
       /* 左侧栏：抽屉，覆盖在圆桌上方 */
       '<aside class="drawer side" style="width:'+sideW+'px;transform:translateX('+(sideOpen?'0':'-100%')+')">'+ sideInner +'</aside>' +
       '<button class="handle h-side" onclick="toggleSide()" title="'+(sideOpen?'收起侧栏':'展开侧栏')+'" style="left:'+(sideOpen?sideW:0)+'px;top:50%">'+ vlabel('侧边栏', sideOpen?'‹':'›') +'</button>' +
@@ -513,9 +516,17 @@ function drawTable(seats,g){
     var nc = nomCur();
     var handUp = !!(nc && nc.hands && nc.hands[i] === true);
     var bub = (S.showBubbles === false) ? '' : bubblesFor(i).map(bubHtml).join('');
+    /* 死者的十字架：还留着死亡票时是亮的（金），投过票之后暗下去 */
+    var deadVoteLeft = dead && !(S.nom && S.nom.deadVoteUsed && S.nom.deadVoteUsed[i]);
+    var crossCls = 'demontag' + (deadVoteLeft ? ' hasvote' : ' spent');
+    /* 正在思考的那位 AI：名字下方显示「思考中…」（可在设置里关掉） */
+    /* AI 是严格串行的：同一时刻只有一位真的在思考，其他人是在排队等自己开口。
+       所以「思考中…」只给当前这位，排队的显示「待发言…」，别让所有人一起闪。 */
+    var isThinking = S.showThinking !== false && S.round && S.round.running && Number(S.round.current) === i;
+    var isWaiting = S.showThinking !== false && !isThinking && S.round && S.round.running && (S.round.waiting || []).indexOf(i) >= 0;
     el.innerHTML = '<div class="bubbles">'+bub+'</div>' +
-      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?'<span class="demontag">✝</span>':'')+'</div>'+
-      '<div class="nameline"><div class="name">'+s.name+'</div><div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
+      '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?('<span class="'+crossCls+'" title="'+(deadVoteLeft?'还有一张死亡票':'死亡票已经用掉')+'">✝</span>'):'')+'</div>'+
+      '<div class="nameline"><div class="name">'+s.name+'</div>'+(isThinking?'<div class="thinking">思考中…</div>':(isWaiting?'<div class="thinking wait">待发言…</div>':''))+'<div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
     table.appendChild(el);
@@ -527,7 +538,7 @@ function bubHtml(m){
   var isDm = m.channel === 'private';
   var toTxt = '';
   if (isDm && m.to && m.to.length){
-    toTxt = '<span class="dmto"> → ' + m.to.map(function(x){
+    toTxt = '<span class="dmto">→ ' + m.to.map(function(x){
       return (x === 'storyteller') ? '说书人' : ((x+1) + ' 号');
     }).join('、') + '</span>';
   }
@@ -537,8 +548,9 @@ function bubHtml(m){
   var bkey = (isDm?'d:':'t:') + String(m.t||'') + ':' + String(m.text||'').length;
   var cached = (S.bubFont || {})[bkey];
   var fs = cached ? (' style="font-size:'+cached+'px"') : '';
-  return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'"'+fs+' data-bkey="'+esc(bkey)+'" data-age="'+age.toFixed(1)+'">'+(isDm?'<span class="dmtag">私聊</span>':'')
-    + colorSelfPronoun(hlMentions(esc(m.text), seatLookup(S.game)), senderColor(S.game, m.from)) + toTxt + '</div>';
+  return '<div class="bubble'+(isDm?' dm':'')+(age>=20?' faded':'')+'"'+fs+' data-bkey="'+esc(bkey)+'" data-age="'+age.toFixed(1)+'">'
+    + (isDm?('<span class="dmtag">私聊</span>'+toTxt):'')
+    + colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), seatLookup(S.game))), senderColor(S.game, m.from)) + '</div>';
 }
 function stBubbles(){
   if (S.showBubbles === false) return '';
@@ -552,7 +564,9 @@ function stBox(g){
   return '<div class="stbox" data-zone="story" onclick="if(S.holdMe){dropMe(\'story\');}">'+
     stBubbles() +
     '<div class="sttoken">'+(isMe?'我':'AI')+'</div>'+
-    '<div class="stname">'+esc(st.name||'说书人')+'</div><div class="strole">说书人</div></div>';
+    '<div class="stname">'+esc(st.name||'说书人')+'</div>'+
+    (S.showThinking !== false && S.story && S.story.running ? '<div class="thinking">思考中…</div>' : '')+
+    '<div class="strole">说书人</div></div>';
 }
 function specBox(){
   var on = meZone()==='spectator';
@@ -957,6 +971,13 @@ async function doNomHand(yes){
   try { await api('nomHand',{id:S.game.id, seat:mySeatInGame(S.game), yes:!!yes}); } catch(e){}
   await loadNom(); render(true); pollNom();
 }
+async function doNomReason(){
+  if (!S.game) return;
+  var txt = (($('#nomDefIn')||{}).value || '').trim();
+  if (!txt) { S.startError='先写一句提名理由'; render(true); return; }
+  try { await api('nomSpeech',{id:S.game.id, kind:'reason', text:txt}); } catch(e){}
+  await loadNom(); render(true); pollNom();
+}
 async function doNomDefense(){
   if (!S.game) return;
   var txt = (($('#nomDefIn')||{}).value || '').trim();
@@ -968,6 +989,37 @@ async function doNomFinish(){
   if (!S.game) return;
   try { await api('nomFinish',{id:S.game.id}); } catch(e){}
   await loadNom(); await refresh();
+}
+/* 圆桌下方的举手浮条：投票阶段一直挂在桌子正中下方，不藏在侧栏里 */
+function nomVoteOverlay(){
+  var g = S.game;
+  if (!g || (g.win && g.win.over)) return '';
+  var stage = nomStage();
+  if (stage !== 'vote' && stage !== 'clock') return '';
+  var cur = nomCur();
+  if (!cur) return '';
+  var mySeat = mySeatInGame(g);
+  if (!iAmPlayer(g) || !(g.alive && g.alive[mySeat])) return '';
+  var seats = g.seats || [];
+  var tn = (cur.target + 1) + ' 号 ' + ((seats[cur.target]||{}).name||'');
+  var meta = S.nom || {};
+  var mine = meta.deadVoteUsed ? !!meta.deadVoteUsed[mySeat] : false;
+  var locked = (stage === 'clock');
+  var myHand = cur.hands ? cur.hands[mySeat] : undefined;
+  var tip;
+  if (locked) tip = (myHand === undefined) ? '时钟轮转中，你还没表态' : (myHand ? '已举手 ✋（时钟转过即锁定）' : '已选择不举手 ✊');
+  else if (myHand === undefined) tip = '要不要举手赞成处决 ' + tn + '？';
+  else tip = myHand ? '你已举手赞成 ✋' : '你已选择不举手 ✊';
+  var h = '<div class="nomfloat" id="nomFloat">';
+  h += '<div class="nomfloattip">' + esc(tip) + (mine ? '（你已用过死亡票）' : '') + '</div>';
+  if (!locked && !mine){
+    h += '<div class="nomfloatbtns">'
+      + '<button class="nomhand-up' + (myHand === true ? ' on' : '') + '" onclick="doNomHand(true)">✋ 举手赞成</button>'
+      + '<button class="nomhand-down' + (myHand === false ? ' on' : '') + '" onclick="doNomHand(false)">✊ 不举手</button>'
+      + '</div>';
+  }
+  h += '</div>';
+  return h;
 }
 function nomPanel(){
   if (!S.game) return '';
@@ -1002,6 +1054,8 @@ function nomPanel(){
   h += '<div class="section nombox"><h3>提名与投票</h3>';
   var tip = '准备中…';
   if (stage === 'ask') tip = '说书人正在询问有提名权的人是否要发起提名。';
+  else if (stage === 'announce') tip = '说书人正在宣告提名：先只说「X 提名 Y」，理由稍后再说。';
+  else if (stage === 'reason') tip = '轮到提名者说明提名理由。';
   else if (stage === 'defense') tip = '被提名者正在做被提名发言。';
   else if (stage === 'vote') tip = '正在投票：举手表示赞成今天处决这个人。';
   else if (stage === 'clock') tip = '正在逐格计时锁定票数。';
@@ -1039,19 +1093,19 @@ function nomPanel(){
       h += '<div class="row"><button onclick="doNomSkip()">今天不再提名</button></div>';
     }
   }
+  if (stage === 'reason' && cur && cur.from === mySeat && control && iAmPlayer(S.game)){
+    h += '<div class="row"><input id="nomDefIn" placeholder="说明你的提名理由（会公开说给全桌）" style="flex:1"><button onclick="doNomReason()">说明理由</button></div>';
+  }
   if (stage === 'defense' && cur && cur.target === mySeat && control && iAmPlayer(S.game)){
     h += '<div class="row"><input id="nomDefIn" placeholder="你的被提名发言" style="flex:1"><button onclick="doNomDefense()">发言</button></div>';
   }
   if (stage === 'vote' && cur && control && iAmPlayer(S.game)){
-    var myHand = cur.hands ? cur.hands[mySeat] : undefined;
-    h += '<div class="nomvotebox">';
-    h += '<div class="nomvotecur">' + (myHand === undefined ? '轮到你决定：要不要举手赞成处决 ' + names(cur.target) + '？'
-      : (myHand ? '你已举手赞成（✋）' : '你已选择不举手（✊）')) + '</div>';
-    h += '<div class="row nomvote">'
-      + '<button class="nomhand-up' + (myHand === true ? ' on' : '') + '" onclick="doNomHand(true)">✋ 举手赞成</button>'
-      + '<button class="nomhand-down' + (myHand === false ? ' on' : '') + '" onclick="doNomHand(false)">✊ 不举手</button>'
-      + '</div>'
-      + '<div class="muted">举手会直接显示在圆桌上；点错了可以随时改，时钟转过你才会被锁定。</div></div>';
+    /* 举手按钮不在侧栏，固定在圆桌下方的浮条上（nomVoteOverlay） */
+    h += '<div class="muted">在圆桌下方点「✋ 举手赞成 / ✊ 不举手」表态，也可以直接点圆桌上自己的座位。</div>';
+  }
+  if (stage === 'clock' && cur && control && iAmPlayer(S.game)){
+    var mh = cur.hands ? cur.hands[mySeat] : undefined;
+    h += '<div class="muted">' + (mh === undefined ? '时钟正在轮转，你还没表态。' : (mh ? '你举手赞成，时钟转过你就会被锁定。' : '你选择不举手。')) + '</div>';
   }
   if ((stage === 'vote' || stage === 'clock') && cur && cur.order && cur.order.length){
     var ptr = (typeof cur.ptr === 'number') ? cur.ptr : -1;
@@ -1232,7 +1286,12 @@ function cheatPanel(seats, sel){
   var roleOpts = '<option value="">—</option>' + (S.script ? S.script.roles : []).map(function(r){ return '<option>'+r+'</option>'; }).join('');
   var seatOpts = seats.map(function(s,i){ return '<option value="'+i+'"'+(i===S.selSeat?' selected':'')+'>'+(i+1)+' 号 '+esc(s.name)+'</option>'; }).join('');
   var seatRow = '<div class="row">目标座位：<select id="cheatSeat" onchange="S.selSeat=+this.value;render()">'+seatOpts+'</select></div>';
-  var h = '<div class="section"><h3>作弊</h3><p class="muted">这里的操作会直接写进对局，说书人 Agent 不会收到通知。仅在救场或测试时使用。</p>'+seatRow;
+  var h = '<div class="section"><h3>作弊</h3><p class="muted">这里的操作会直接写进对局，说书人 Agent 不会收到通知。仅在救场或测试时使用。</p>'
+ + '<div class="cheattip"><b>最高权限指令</b>：在公聊或私聊里发送 <code>/admin 内容</code>（等价写法：<code>/ad</code> <code>/a</code> <code>/ch</code> <code>/cheat</code> <code>/c</code> <code>/z</code> <code>/zb</code> <code>/g</code> <code>/gl</code> <code>/gly</code> <code>/管理员</code> <code>/管理</code> <code>/作弊</code> <code>/作</code>，忽略大小写），'
+ + '指令会直接下达给说书人，它对说书人是最高权限：必须如实回答，不再受「不能透露别人的角色」这类限制。指令与回答都不会出现在公聊。</div>'
+ + '<div class="cheattip"><b>可以直接下达的操作</b>：处决/杀死/复活某人、把某人改成某角色、改阵营、免死、推进到白天或夜晚、宣布终局（说明是善良还是邪恶胜利）。这些指令由引擎直接执行并立刻写进真实状态，不会再出现「说书人嘴上说处决了、实际没死」的情况。</div>'
+    + '指令本身不会出现在公聊（公聊只留一行提示），回答只会回到你这里，别的玩家看不到。</div>'
+    + seatRow;
   h += '<div class="cheatgrp"><h4>发言与驱动</h4>'+
     '<div class="row"><input id="cheatSay" class="smname-input" placeholder="用这个座位发一条公开消息">'+
     '<button onclick="cheatSpeak()">发言</button></div>'+
@@ -1250,9 +1309,9 @@ function cheatPanel(seats, sel){
     '<input id="winReason" class="smname-input" placeholder="原因（可选）">'+
     '<button onclick="if(confirm(\'确定宣布本局结束？说书人会先发复盘再终局。\'))doEndGame()">宣布终局</button></div></div>';
   h += '<div class="cheatgrp"><h4>以管理员身份私聊说书人</h4>'+
-    '<div class="row"><input id="adminSay" class="smname-input" placeholder="只有说书人能看到这句话；它会考虑并回复你">'+
+    '<div class="row"><input id="adminSay" class="smname-input" placeholder="例如：列出每个人的真实角色 / 现在夜里进行到哪一步">'+
     '<button onclick="adminSay()">发送</button></div>'+
-    '<div class="muted">用于直接向 Agent 说书人下达裁定、询问状态或纠错，不会出现在公聊。</div></div>';
+    '<div class="muted">等同在聊天里发「/admin 内容」「/作弊 内容」。这条指令对说书人是最高权限：它必须如实回答，不再受「不能透露别人的角色」这类限制。指令与回答都不会出现在公聊。</div></div>';
   h += '<div class="cheatgrp"><h4>说书人日志</h4>'+ storyLogHtml() +'</div>';
   h += '</div>';
   return h;
@@ -1321,6 +1380,7 @@ function settingsPanel(){
       sw('nightTheme','夜晚切换为冷色主题','进入夜晚/日落时界面变成蓝紫色。')+
       sw('showTimer','白天显示计时器','圆桌中心左下角显示「白天 分:秒」。')+
       sw('showBubbles','头像上方显示聊天气泡','只显示最近一条，20 秒后自动淡出。')+
+      sw('showThinking','正在思考的 AI 显示「思考中…」','显示在名字下方，一眼看出现在轮到谁在思考。')+
       sw('showScriptLine','圆桌中心显示剧本名','')+
     '</div>'+
     '<div class="section"><h3>设置 · 角色决定</h3>'+roleModeSelect()+'</div>'+
@@ -1476,7 +1536,7 @@ function roundSection(){
   var waiting = st.waiting || [];
   var thinking = st.running ? Math.max(0, st.total - st.done) : 0;
   return '<div class="section"><h3>AI 玩家</h3>'+
-    (st.running ? ('<div class="muted">目前 ' + thinking + ' 个 Agent 正在思考…</div>') : '') +
+    (st.running ? ('<div class="muted">依次发言中：' + thinking + ' 位还没轮到' + (st.current!=null&&st.current>=0?('，现在轮到 ' + (Number(st.current)+1) + ' 号'):'') + '（AI 一位说完再轮下一位）</div>') : '') +
     '</div>';
 }
 /* 手动让 AI 自己聊一轮（不需要玩家先说话） */
@@ -1531,7 +1591,7 @@ function pageSig(){
   parts.push((g.alive||[]).map(function(x){ return x?1:0; }).join(''));
   /* 消息条数不进指纹：新消息只重画聊天区与座位气泡（paintChatIfNeeded），
      否则每来一句话都要整页重建，看起来就是抽搐 */
-  parts.push(String((S.round && S.round.running) ? 1 : 0) + (S.round && S.round.done || 0));
+  parts.push(String((S.round && S.round.running) ? 1 : 0) + (S.round && S.round.done || 0) + '_' + String((S.round && S.round.current) == null ? '-' : S.round.current));
   parts.push(String((S.story && S.story.running) ? 1 : 0));
   var n = (S.nom && S.nom.nom) ? S.nom.nom : null;
   parts.push(n ? (String(n.stage||'') + '|' + (n.cur ? (n.cur.from+'-'+n.cur.target+'-'+(n.cur.ptr)) : '-') + '|' + ((n.queue||[]).length) + '|' + ((n.results||[]).length)) : 'non');
@@ -1696,7 +1756,7 @@ function chatMsgsHtml(g, channel, peer){
       }).join('、') + '</span>';
     }
     return '<div class="msg ' + cls + '"><span class="who">' + who + '</span>' + tag + toTxt
-      + '<div class="mtext">' + colorSelfPronoun(hlMentions(esc(m.text), lk), senderColor(g, m.from)) + '</div></div>';
+      + '<div class="mtext">' + colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), lk)), senderColor(g, m.from)) + '</div></div>';
   }).join('');
   return h || '<div class="muted">' + (channel === 'private' ? '还没有私聊。' : '暂无消息') + '</div>';
 }
@@ -1999,6 +2059,23 @@ function seatBadge(i, name){
   return '<span class="snbadge" style="background:'+c+'">'+(Number(i)+1)+'</span>'
        + '<span class="snname" style="color:'+c+'">'+esc(name||((Number(i)+1)+' 号'))+'</span>';
 }
+/* 把正文里的「3 号」「3号」「3 號」染成该座位的颜色。
+   只在标签之外替换，避免改到 style="..." / class="..." 里的内容。 */
+function hlSeatNums(html){
+  var g = S.game || null;
+  var total = (g && g.seats && g.seats.length) || (S.seats && S.seats.length) || 0;
+  if (!total) return html;
+  var parts = String(html == null ? '' : html).split(/(<[^>]*>)/g);
+  for (var i = 0; i < parts.length; i++){
+    if (parts[i].charAt(0) === '<') continue;
+    parts[i] = parts[i].replace(/(\d{1,2})(\s*)(号|號)/g, function(all, num, sp, hao){
+      var idx = Number(num) - 1;
+      if (!isFinite(idx) || idx < 0 || idx >= total) return all;
+      return '<span class="seatref" style="color:' + seatColor(idx) + '">' + num + sp + hao + '</span>';
+    });
+  }
+  return parts.join('');
+}
 /* 把「@名字」标成对方座位的颜色。lookup = { names:[长名在前], colorOf(name) } */
 function hlMentions(escaped, lookup){
   var s = String(escaped||'');
@@ -2173,7 +2250,32 @@ async function refresh(){
     if (S.storyLog && S.storyLog.length !== before) render(true);
   }
 }
-setInterval(refresh, 3000);
+setInterval(refresh, 2500);
+/* 聊天专用快轮询：整页刷新要 2.5 秒，聊天不能等那么久。
+   只拉一次 messages 并局部重画，不动整页，所以又便宜又不闪。 */
+var chatPollBusy = false;
+setInterval(async function(){
+  if (chatPollBusy || !S.game) return;
+  if (document.hidden) return;
+  chatPollBusy = true;
+  try { await loadChat(true); paintChatIfNeeded(); } catch(e){}
+  chatPollBusy = false;
+}, 1100);
+/* 阶段专用快轮询：天黑/天亮/有人死亡这类变化不能等 2.5 秒整页刷新，
+   这里只问一个极小的 /api/phase，一旦阶段、天数或存活状态变了就立刻整体刷新。 */
+var phasePollBusy = false;
+setInterval(async function(){
+  if (phasePollBusy || !S.game || document.hidden) return;
+  phasePollBusy = true;
+  try {
+    var p = await api('phase', { id: S.game.id });
+    if (p && p.ok) {
+      var sig = [p.phase, p.day, p.night, (p.alive||[]).map(function(x){return x?1:0;}).join(''), (p.win && p.win.over) ? 1 : 0].join('|');
+      if (sig !== S.phaseSig) { S.phaseSig = sig; refresh(); }
+    }
+  } catch(e){}
+  phasePollBusy = false;
+}, 900);
 /* 每 40 秒随机唤醒一位存活 AI 思考一次（对局进行中、无其它轮次在跑时） */
 setInterval(function(){
   if(!S.game || (S.game.win && S.game.win.over)) return;

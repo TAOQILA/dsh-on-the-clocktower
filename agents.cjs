@@ -26,7 +26,7 @@ const path = require('path');
 const E = require('./engine.cjs');
 
 const ROOT = __dirname;
-const MAX_MSGS_IN_PROMPT = 40;
+const MAX_MSGS_IN_PROMPT = 20;   /* 只带最近 20 条：历史越长首 token 越慢，这些足够推理 */
 /* 私聊不再限制次数：上限只是防模型一次刷屏的兜底 */
 const MAX_DM_PER_DAY = 99;
 const CALL_TIMEOUT_MS = 90000;
@@ -41,11 +41,11 @@ const PAGES = path.join(ROOT, 'data', 'wiki', 'pages');
 const PLAYER_RULES = ['规则概要','重要细节','术语汇总','投票','提名'];
 const ST_RULES = ['规则概要','重要细节','夜晚行动顺序一览','相克规则','隐性规则汇总','给说书人的建议'];
 const CORE_RULES = ST_RULES;
-const PAGE_CLIP = 6000;      /* 单页最多注入字符数 */
-const OWN_CLIP = 4000;       /* 玩家自己角色页最多注入字符数 */
-const ROLE_DETAIL_CLIP = 850;/* 说书人：每个角色细则最多注入字符数 */
-const SYSTEM_CLIP = 40000;   /* 玩家 system 最多字符数 */
-const ST_SYSTEM_CLIP = 24000;/* 说书人 system 最多字符数：只带核心规则和精简角色能力，避免超长 prompt 拖慢响应 */
+const PAGE_CLIP = 3000;      /* 单页最多注入字符数 */
+const OWN_CLIP = 2000;       /* 玩家自己角色页最多注入字符数 */
+const ROLE_DETAIL_CLIP = 500;/* 说书人：每个角色细则最多注入字符数 */
+const SYSTEM_CLIP = 14000;   /* 玩家 system 最多字符数：prompt 越短模型吐字越快 */
+const ST_SYSTEM_CLIP = 16000;/* 说书人 system 最多字符数：只带核心规则和精简角色能力，避免超长 prompt 拖慢响应 */
 /* 阅读规则（与 data/wiki/INDEX.md 顶部一致）——所有 Agent 开局必读顺序 */
 const READING_RULES = [
   '【阅读规则·开局必读】按下列顺序学习本局知识，条目用 wiki_lookup(页面名) 查看，文件名即页面名：',
@@ -151,9 +151,23 @@ const ST_TONE = [
   '避免「得看…」「要看…才行」这种把玩家当小孩的口气；同样的内容用中性说法说完就停，不要加一句评论。',
 ].join('\n');
 
+/* 四种身份类型是互不相同的分类。说书人最容易犯的错就是把外来者当成镇民，
+   于是给「你会得知一个镇民角色」这类能力配了管家、酒鬼这种外来者。
+   这一段在每一处说书人提示词里都注入，并且明确「类型只看括号标签」。 */
+const FACTION_RULES = [
+  '【四种身份类型 · 必须严格区分】本游戏的所有角色分属四个互不相同的身份类型，一个角色只属于其中一种，绝不可混用：',
+  '· 镇民（好人阵营）：能力通常带来信息或保护，例如洗衣妇、图书管理员、调查员、厨师、共情者、占卜师、士兵、市长。',
+  '· 外来者（好人阵营，但能力通常对自己人有害）：例如管家、酒鬼、陌客、圣徒、修补匠、月之子、狂人。外来者不是镇民，也不是邪恶。',
+  '· 爪牙（邪恶阵营）：例如投毒者、间谍、男爵、红唇女郎、教父。爪牙不是恶魔，也不是镇民。',
+  '· 恶魔（邪恶阵营）：例如小恶魔、僵怖、普卡、沙巴洛斯、方古。每局通常只有一名恶魔。',
+  '判断某个角色属于哪种类型，唯一依据是角色清单里角色名后面括号中的标签（如「管家（外来者）」），不要凭名字或印象猜测。',
+  '当能力要求「一个镇民角色」「一个外来者角色」「一个爪牙」时，只能从对应类型里选；给错类型就是明确的主持失误，必须避免。',
+  '例：洗衣妇的能力是「你会得知两名玩家和一个镇民角色：这两名玩家之一是该角色」——这里必须是镇民，绝不能是管家、酒鬼这类外来者，也不能是爪牙或恶魔。同理，图书管理员给的是外来者，不是镇民。',
+].join('\n');
+
 function storytellerSystem(id){
   const kb = gameKnowledge(id);
-  return clip(RULES + '\n\n' + stylePrompt(id) + '\n\n' + READING_RULES + '\n\n' + BALANCE_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
+  return clip(RULES + '\n\n' + stylePrompt(id) + '\n\n' + READING_RULES + '\n\n' + FACTION_RULES + '\n\n' + BALANCE_RULES + '\n\n【本局说书人知识（仅本局相关）】\n规则要点：\n' + kb.ruleText
     + '\n\n本剧本：' + (kb.scriptText||'')
     + '\n\n本剧本全部角色能力速览：\n' + kb.roleBrief
     + '\n\n本剧本角色细则：\n' + kb.roleDetail, ST_SYSTEM_CLIP);
@@ -305,6 +319,8 @@ const RULES = [
   '不要提及「提示词」「模型」「AI」「机器人」等元信息，像普通玩家一样说话。',
   '指代任何一位玩家时必须写成「@名字」，例如「我觉得 @长庚 有问题」。不要只用座位号，也不要只写名字而不带 @。',
   '使用公开能力、或需要说书人裁定/公布结果时，要在发言里 @说书人 并说明你要做什么（例如「@说书人 我要公开查验结果」）；玩家可以不这么做，但你作为 AI 要养成这个习惯，否则说书人可能收不到你的请求。',
+  '提名是有礼仪顺序的：① 提名时只说「@X 提名 @Y」，不要一上来就讲理由 ② 说书人点名请你说明理由时，你才说理由 ③ 说书人请被提名者反驳，被提名者才开口 ④ 之后才投票。轮到你之前不要抢话。',
+  '提名阶段进入正式的一项提名后，只有提名者、被提名者和说书人可以公开发言，其他人保持安静。',
   '称呼你自己时用「我」，不要 @ 自己，也不要用第三人称说自己。',
   '说书人在夜里私聊询问你的问题（例如让你选择谁）必须如实回答，不能沉默、不能回避；这是你的角色义务。',
   '如果你是善良阵营：不要一味抗拒被处决。当你的角色能力已经用完、或者再留着也帮不上好人时，被投出去反而能给好人一张「死得干净」的身份证明、把票位让给更需要的人，这对好人是有利的；判断该不该为自己辩护时请把这层算进去。',
@@ -399,16 +415,16 @@ function buildPrompt(id, seat, replyTo, mode) {
     const reactedCount = Object.keys(answered).length;
     lines.push('【接话热度】这条消息之后，已经有 ' + reactedCount + ' 位玩家接了话。');
     lines.push(talkBiasText(id));
-    if (reactedCount >= 2) {
-      lines.push('已经不少人说过了：除非你被 @ 到、被点名、被怀疑、被问到，或手里有直接相关的信息，否则大概率不必再说，say 写空字符串 ""。闲聊寒暄两三个人接就够了，不要人人都回。');
-    } else if (reactedCount === 1) {
-      lines.push('已经有一人接话：如果只是闲聊附和，你可以沉默；有不同观点或相关信息才说一句。');
+    if (reactedCount >= 3) {
+      lines.push('已经有三四个人说过了：除非你被 @ 到、被点名、被怀疑、被问到，或手里有直接相关的信息，否则可以不说了，say 写空字符串 ""。');
+    } else if (reactedCount >= 1) {
+      lines.push('已经有人接话，但仍然需要你表态：有观点、有信息、有怀疑对象就直说，别只是附和。');
     } else {
-      lines.push('还没有人接话，你可以接一句。');
+      lines.push('【还没有任何人回应这条消息】场子不能冷：你必须开口接一句，给出你的看法、态度或追问，不能沉默。');
     }
     lines.push(stylePrompt(id));
     lines.push('被 @ 到、被点名、被怀疑、被问到，或者你手上有跟它直接相关的信息 —— 那一定要说一句（但也可以用玩笑的方式说）。');
-    lines.push('确实无话可说时，say 才写空字符串 ""。要接的话只说一句，不要复述别人刚说过的话，不要长篇大论。');
+    lines.push('尽量不要说空话，但也不要把场面晾着：能接就接一句（一句话就够），只有确实完全插不上话时才写空字符串 ""。不要复述别人刚说过的话，不要长篇大论。');
     if (v.phase === 'night') lines.push('现在是夜晚：可以公开发言（不能私聊）。夜里大家也在广场上低声交谈，别因为天黑了就闭口不谈。');
     else lines.push('想单独问谁就私聊谁（whisper），不限次数；但别刷屏，一两句说清楚。');
   } else {
@@ -416,7 +432,8 @@ function buildPrompt(id, seat, replyTo, mode) {
     lines.push('公开发言一句（按上面的风格说话，可以闲聊、给点信息或拉票），想单独问谁就私聊谁（whisper），不限次数。');
   }
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
-  lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}]}');
+  lines.push('{"think":"你的真实推理（不公开）","say":"你的公开发言","whisper":[{"to":[座位号（从 1 开始）],"text":"私聊内容"}],"nominate":[你今天想提名的座位号，按优先级排序，可以为空数组]}');
+  lines.push('【提名清单 nominate】你脑子里一直维护着一份「今天我想提名谁」的名单：把最想处决的人排最前面。每一次发言都可以顺手更新它——名单没变化就不要写这个字段（或者写 null）；要改就写完整的新名单，例如 [3,6]；确实一个人都不想提名就写空数组 []。到提名阶段说书人一问，系统会直接拿这份名单里还活着、今天还没被提名过的第一个人去发起提名，不会再问你一遍。所以名单要提前想清楚。');
   lines.push('如果不想私聊，whisper 给空数组。');
   return { prompt: lines.join('\n'), view: v };
 }
@@ -454,6 +471,7 @@ function buildStorytellerNightPrompt(id) {
   lines.push('你必须公正：不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
   lines.push('但公正不等于机械：你是这一局的天平。每一夜先称一次天平，判断善良方与邪恶方谁更弱，再用能力描述里留给你的裁量空间（「可能」「由你决定」「你可以选择」）去扶弱的一方。开局时邪恶方通常更弱。');
   lines.push('【保密铁律 · 违反即毁掉整局】绝不能在公聊里说出你夜里唤醒了谁、给了谁什么信息、谁夜里做了什么、谁是什么角色。夜里公开说的只能是气氛性的、全桌都能听的话（例如「天黑了，大家闭眼」）。夜间行动的具体对象与结果一律只能私下发给当事人。');
+  lines.push(FACTION_RULES);
   lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），必须由你先主动私聊询问该玩家「你想选择谁」，等 ta 回复后再按 ta 的选择结算；你不能自己替他挑，也不能让玩家未经询问就自己报目标。');
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
@@ -471,12 +489,13 @@ function buildStorytellerNightPrompt(id) {
   if (vrb) { lines.push(''); lines.push('【本局投票相关角色 · 需要你在主持时照顾】'); lines.push(vrb); }
   lines.push('【关于提名处决】你不必急着投票。先听大家讨论：当有人提出了值得表决的指控、讨论已经充分、或者白天拖得太久（比如超过 10 分钟）没人推进，你就发起对某人的处决投票（见输出字段 voteTarget）。投票要按规则来：只有存活玩家有票，赞成必须多于反对且赞成票达到存活人数的一半才算通过。公告结果时如实说明票数与是否处决。');
   lines.push('');
-  lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）');
+  lines.push('【全场座位与真相】（座位号一律从 1 开始，与本表一致；你回包里的 seat/deaths 也要用 1 起的座位号）；角色名后面括号里的就是它的身份类型，给信息时严格按这个类型来选');
   v.seats.forEach(function (x) {
     const ri = x.role ? roleInfo(x.role) : null;
     const ab = ri && ri.ability ? (' 能力=' + String(ri.ability).replace(/\s+/g, ' ').slice(0, 220)) : '';
+    const ft = ri ? ('（' + (ri.faction_zh || ri.faction || '') + '）') : '';
     lines.push((x.seat+1) + ' 号：' + x.name
-      + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ab
+      + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ft + ab
       + (x.markers.length ? (' 标记=' + x.markers.join(',')) : '')
       + (x.info.length ? (' 已告知：' + x.info.map(function (i) { return i.text; }).join(' | ')) : ''));
   });
@@ -528,6 +547,7 @@ function buildStorytellerDayPrompt(id) {
   const lines = [];
   lines.push('你是「血染钟鱼」的说书人。现在是白天，玩家们正在公开讨论、提名与投票。');
   lines.push(ST_TONE);
+  lines.push(FACTION_RULES);
   lines.push('你要做的是：观察讨论、必要时提醒规则、在投票结束后公布结果、决定是否有人被处决。');
   lines.push('不要替玩家做决定，也不要暗示谁好谁坏。');
   lines.push('公聊要克制：没有人问你、也没有必须公布的结果（天亮、死亡、投票结果）时就不要说话，say 留空字符串。不要评论每个玩家的发言、不要替大家主持讨论、不要刷存在感。');
@@ -539,7 +559,8 @@ function buildStorytellerDayPrompt(id) {
   v.seats.forEach(function (x) {
     const ri = x.role ? roleInfo(x.role) : null;
     const ab = ri && ri.ability ? (' 能力=' + String(ri.ability).replace(/\s+/g, ' ').slice(0, 220)) : '';
-    lines.push((x.seat+1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ab);
+    const ft = ri ? ('（' + (ri.faction_zh || ri.faction || '') + '）') : '';
+    lines.push((x.seat+1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配') + ft + ab);
   });
   lines.push('');
   lines.push('【公开对话记录】');
@@ -584,7 +605,8 @@ async function callModel(payload) {
         seat: payload.seat,
         game: payload.game,
         provider: payload.provider || '',
-        model: payload.model || ''
+        model: payload.model || '',
+        maxTokens: payload.maxTokens || 0
       });
       const flat = (text && typeof text === 'object') ? (text.text != null ? text.text : (text.content != null ? text.content : '')) : text;
       return { text: String(flat == null ? '' : flat) };
@@ -645,7 +667,7 @@ function extractObject(text) {
 /* 容错解析：去代码块、抓第一个平衡 JSON、失败则整段当发言 */
 function parseReply(raw) {
   let text = String(raw == null ? '' : raw).trim();
-  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '', reply: '' };
+  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '', reply: '', nominate: null };
   if (!text) return empty;
   const fenceRe = new RegExp(FENCE + '(?:json)?\\s*([\\s\\S]*?)' + FENCE, 'i');
   const fence = text.match(fenceRe);
@@ -671,6 +693,8 @@ function parseReply(raw) {
     reply: String(obj.reply == null ? '' : obj.reply),
     /* 白天主持时：说书人自己判断现在是否该进入提名阶段 */
     enterNomination: obj.enterNomination === true
+    ,/* 提名清单：null 表示这一轮没提到、不要改动；数组(可为空)表示用新清单覆盖 */
+    nominate: Array.isArray(obj.nominate) ? obj.nominate.map(Number).filter(function (n) { return n >= 1; }) : null
   };
 }
 
@@ -705,6 +729,8 @@ async function applyOne(id, seat, out, opts, run){
     ? { think: '', say: '', whisper: [], error: out.error }
     : parseReply(out.text);
   if (parsed.think) E.think(id, seat, parsed.think);
+  /* 每次思考都可以顺手更新自己的提名清单：AI 自己维护，到提名阶段直接取用 */
+  if (Array.isArray(parsed.nominate)) { try { E.nomSetIntent(id, seat, parsed.nominate); } catch (e) {} }
   const dmReplyTo = (opts.replyTo === 'storyteller') ? 'storyteller' : ((opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') ? Number(opts.replyTo) : -1);
   const isDm = (dmReplyTo === 'storyteller' || dmReplyTo >= 0);
   const nightNow = (st.phase === 'night');
@@ -735,6 +761,8 @@ async function applyOne(id, seat, out, opts, run){
     /* 模型给的座位号是 1 起，落库用 0 起 */
     const to = (w.to || []).map(function (n) { return Number(n) - 1; })
       .filter(function (n) { return n >= 0 && n < st.seats.length && n !== seat; });
+    /* 以「@说书人」开头的私聊是给主持人的回复：不要误投给某个座位 */
+    if (/^\s*@?\s*(说书人|主持人)/.test(String(w.text || ''))) { E.say(id, seat, String(w.text || ''), 'private', ['storyteller']); return; }
     if (to.length) E.say(id, seat, w.text, 'private', to);
   });
   const dmBackFinal = (isDm) ? dialectText(parsed) : '';
@@ -793,7 +821,7 @@ function mentionedSeats(id) {
   /* 长名字优先：先把「长庚二号」认走，免得它又被当成「长庚」；
      认走的名字在文本里挖掉，短名字就不会再误命中。 */
   s.seats.map(function (x, i) { return { name: (x && x.name) ? x.name : '', i: i }; })
-    .filter(function (x) { return x.name.length >= 2; })
+    .filter(function (x) { return x.name.length >= 1; })
     .sort(function (a, b) { return b.name.length - a.name.length; })
     .forEach(function (x) {
       if (txt.indexOf(x.name) < 0) return;
@@ -830,8 +858,10 @@ async function thinkAndSpeak(id, seat, opts) {
   let out = null;
   let round = 0;
   let lastN = msgCount();
+  /* 最多重想 2 轮：每多一轮就多一次完整模型调用，是整轮发言最慢的一环 */
   for (;;) {
     round++;
+    if (round > 2) break;
     const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
     const prompt = (round === 1)
       ? built.prompt
@@ -839,7 +869,10 @@ async function thinkAndSpeak(id, seat, opts) {
         + '你之前的想法可能已经不成立了，请结合这些新消息重新判断，再给出你这一轮的回答。';
     let cur;
     try {
-      cur = await callModel({ game: id, seat: seat, prompt: prompt, system: system, provider: route.provider, model: route.model });
+      cur = await Promise.race([
+        callModel({ game: id, seat: seat, prompt: prompt, system: system, provider: route.provider, model: route.model, maxTokens: 700 }),
+        new Promise(function (res) { setTimeout(function () { res({ error: '模型调用超时（' + Math.round(MODEL_TIMEOUT_MS / 1000) + ' 秒），本轮跳过' }); }, MODEL_TIMEOUT_MS); })
+      ]);
     } catch (e) {
       if (out) break;
       return { error: String((e && e.message) || e) };
@@ -879,7 +912,11 @@ async function runRound(id, opts) {
        是否开口由每位 AI 自己判断（say 留空即沉默）。 */
     /* 随机顺序接话：不是按座位号一个一个来 */
     pool = order.slice();
-    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+    const _ment = mentionedSeats(id).filter(function (n) { return pool.indexOf(n) >= 0; });
+    /* 被 @ 的人排到最前面：先让被点名的人开口，别让他排在四五个人后面等半天 */
+    pool = _ment.concat(pool.filter(function (n) { return _ment.indexOf(n) < 0; }));
+    for (let _i = pool.length - 1; _i > _ment.length; _i--) { const _j = _ment.length + Math.floor(Math.random() * (_i - _ment.length + 1)); const _t = pool[_i]; pool[_i] = pool[_j]; pool[_j] = _t; }
+    /* 其余人随机排序：不是按座位号一个一个来 */
   } else {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
   }
@@ -1137,9 +1174,15 @@ function buildNomPrompt(id, seat, kind, extra){
   if (kind === 'propose') {
     lines.push('【现在】轮到你表态：今天要不要发起提名？');
     lines.push('规则：每位存活玩家每天只有 1 次提名权；同一时间只能有一项提名；可以提名自己。');
-    lines.push('想提名就把 nominate 写 true，并在 target 写被提名者的座位号（从 1 开始），reason 写你要公开说的提名理由（一两句，直接对全桌说，不要写「我要提名」以外的客套）。');
+    lines.push('【提名礼仪】正式流程是：① 你先只说「@X 提名 @Y」② 说书人点名请你说明理由，你才说理由 ③ 说书人请被提名者反驳 ④ 才开始投票。所以现在这一步你只要给出「提名谁」以及你打算说的理由，不要自己一上来就把理由倒出来。');
+    lines.push('想提名就把 nominate 写 true，并在 target 写被提名者的座位号（从 1 开始），reason 写你稍后要公开说明的提名理由（一两句，直接对全桌说）。');
     lines.push('不想提名就 nominate 写 false，target 写 0，reason 留空。不要为了凑热闹乱提名。');
     lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","nominate":true或false,"target":座位号,"reason":"提名理由"}');
+  } else if (kind === 'reason') {
+    lines.push('【现在】你刚刚提名了 ' + extra.target + ' 号 ' + extra.targetName + '，说书人请你说明理由。');
+    if (extra.hint) lines.push('你原先的打算：「' + extra.hint + '」。可以照这个说，也可以按场上最新情况调整。');
+    lines.push('说一两句话，直接对全桌说清楚你为什么要提名他。不要写「我要提名」这种客套，也不要长篇大论。');
+    lines.push('严格只输出一个 JSON 对象：{"think":"你的真实判断","say":"你的提名理由"}');
   } else if (kind === 'defense') {
     lines.push('【现在】你被 ' + extra.from + ' 号 ' + extra.fromName + ' 提名了，理由：「' + (extra.reason||'（没有说明）') + '」。');
     lines.push('请做被提名发言：为自己辩护、说明你的身份与信息、或者指出提名者的破绽。一两句话，直接对全桌说。');
@@ -1215,35 +1258,88 @@ async function runNomination(id, opts){
         if (!askList.length) break;
         setStage('ask');
         nomSay(id, pi === 0 ? '现在进入提名阶段。想发起提名的人请说出你要提名谁、理由是什么。' : '还有没有人要发起提名？');
+        /* 催办：提名阶段不能拖成茶话会。每 18 秒点一次名，把还没表态的人念出来 */
+        const nudge = setInterval(function () {
+          try {
+            const stN = E.nomState(id);
+            if (!stN.ok || run.stage !== 'ask') return;
+            const sN = E.loadState(id);
+            const left = askList.filter(function (x) { return sN.alive[x] && !(stN.nom.asked[x]); });
+            if (!left.length) return;
+            if (!left.length) { clearInterval(nudge); return; }
+            const names = left.map(function (x) { return '@' + (x+1) + ' 号 ' + (sN.seats[x] ? sN.seats[x].name : ''); }).join('、');
+            E.say(id, 'storyteller', '提名阶段不要拖：' + names + '，请马上表态——要提名谁，或者明确说今天不提名。', 'town');
+          } catch (e) {}
+        }, 18000);
+        if (nudge.unref) nudge.unref();
         log('询问第 ' + (pi+1) + ' 轮：' + askList.length + ' 位玩家需要表态');
-        for (const seat of askList) {
+        /* 全员同时开始思考「要不要提名」：以前是一个个排队问，7 个人就要等 7 个模型的完整时延。
+           现在并发调用，再按座位顺序把结果落库（落库必须串行，saveState 是全量写）。 */
+        const aiAsk = [];
+        const humanAsk = [];
+        askList.forEach(function (seat) {
           const sNow = E.loadState(id);
-          if (sNow.nom && sNow.nom.asked[seat]) continue;
-          if (seatType(sNow, seat) === 'player') {
-            /* 真人：等他点「提名」或「不提名」（前端调 nomPropose / nomSkip），超时才自动跳过 */
+          if (sNow.nom && sNow.nom.asked[seat]) return;
+          if (seatType(sNow, seat) === 'player') humanAsk.push(seat); else aiAsk.push(seat);
+        });
+        log('同时唤醒 ' + aiAsk.length + ' 位 Agent 思考是否提名' + (humanAsk.length ? '，并等待 ' + humanAsk.length + ' 位真人表态' : ''));
+        /* AI 的提名不再现场问：每位 Agent 平时聊天时就在维护自己的「提名清单」，
+           这里直接照着清单取第一个还活着、今天还没被提名过的人，立刻发出来。
+           清单为空的就不提名。只有清单从未建立过的老玩家才临时问一次模型。 */
+        const aiOuts = [];
+        const askNow = [];
+        for (const seat of aiAsk) {
+          let picked = 0; try { picked = E.nomPickIntent(id, seat); } catch (e2) { picked = 0; }
+          const hasList = (function () { try { const sI = E.loadState(id); return !!(sI.nomIntents && Object.prototype.hasOwnProperty.call(sI.nomIntents, seat)); } catch (e2) { return false; } })();
+          if (picked > 0) { aiOuts.push({ seat:seat, r:{ obj:{ nominate:true, target:picked, reason:'' } } }); }
+          else if (hasList) { aiOuts.push({ seat:seat, r:{ obj:{ nominate:false, target:0, reason:'' } } }); }
+          else askNow.push(seat);
+        }
+        const aiPending = askNow.map(function (seat) {
+          return askSeat(id, seat, 'propose', {}).then(function (r) {
+            /* 临时问出来的结果顺手存回清单，下次就不用再问 */
+            try { if (r && r.obj) { const o = r.obj; E.nomSetIntent(id, seat, o.nominate === true && Number(o.target) > 0 ? [Number(o.target)] : []); } } catch (e2) {}
+            return { seat:seat, r:r };
+          }).catch(function (e2) { return { seat:seat, r:{ error:String((e2 && e2.message) || e2) } }; });
+        });
+        /* 真人这段时间也在表态，AI 处理与真人决策是并行的 */
+        const humanWait = (async function () {
+          for (const seat of humanAsk) {
             const t0 = Date.now();
             for (;;) {
               const stW = E.nomState(id);
               if (!stW.ok || stW.nom.asked[seat]) break;
               if (Date.now() - t0 > NOM_ASK_WAIT_MS) { E.nomMarkAsked(id, seat); break; }
-              await sleep(500);
+              await sleep(400);
             }
-            continue;
           }
-          const r = await askSeat(id, seat, 'propose', {});
+        })();
+        const tmpOuts = await Promise.all(aiPending);
+        tmpOuts.forEach(function (x) { aiOuts.push(x); });
+        await humanWait;
+        clearInterval(nudge);
+        for (const got of aiOuts) {
+          const seat = got.seat, r = got.r;
           E.nomMarkAsked(id, seat);
-          if (r.error) { log((seat+1) + ' 号提名表态失败：' + r.error); continue; }
-          const want = (r.obj && r.obj.nominate === true);
-          const tgt = Number((r.obj && r.obj.target) || 0);
+          if (!r || r.error) { log((seat+1) + ' 号提名表态失败：' + ((r && r.error) || '未知错误')); continue; }
+          let want = (r.obj && r.obj.nominate === true);
+          let tgt = Number((r.obj && r.obj.target) || 0);
           const reason = String((r.obj && r.obj.reason) || '').trim();
+          const sNow = E.loadState(id);
+          /* 目标不可用（死了 / 今天已被提名 / 自己）就顺着清单往下取下一个 */
+          for (let guard = 0; want && guard < 6; guard++) {
+            const okT = tgt >= 1 && tgt <= sNow.seats.length && sNow.alive[tgt-1] && !((sNow.nom && sNow.nom.usedTarget) || {})[tgt-1];
+            if (okT) break;
+            let nx2 = 0; try { nx2 = E.nomPickIntent(id, seat); } catch (e2) { nx2 = 0; }
+            if (!nx2 || nx2 === tgt) { want = false; break; }
+            tgt = nx2;
+          }
           if (!want || !(tgt >= 1 && tgt <= sNow.seats.length)) continue;
-          if (tgt - 1 === seat) { /* 可以提名自己 */ }
           const pr = E.nomPropose(id, seat, tgt - 1, reason);
           if (!pr.ok) { log((seat+1) + ' 号提名未生效：' + pr.error); continue; }
+          try { E.nomDropIntent(id, seat, tgt); } catch (e2) {}
           anyNom = true;
           log((seat+1) + ' 号提名了 ' + tgt + ' 号：' + reason);
-          /* 提名理由由提名者自己公开说出来 */
-          if (reason) E.say(id, seat, reason, 'town');
         }
         /* ---- 处理队列（真人在提问阶段也可能自己提名，所以以队列是否有货为准）---- */
         for (;;) {
@@ -1254,14 +1350,35 @@ async function runNomination(id, opts){
           anyNom = true;
           const c = nx.cur;
           run.cur = { from:c.from, target:c.target };
-          setStage('defense');
           const sC = E.loadState(id);
-          if (c.reason) nomSay(id, (c.from+1) + ' 号 ' + sC.seats[c.from].name + ' 提名了 ' + (c.target+1) + ' 号 ' + sC.seats[c.target].name + '。');
-          /* 被提名发言 */
-          if (seatType(sC, c.target) === 'player') {
+          const nmF = (c.from+1) + ' 号 ' + sC.seats[c.from].name;
+          const nmT = (c.target+1) + ' 号 ' + sC.seats[c.target].name;
+          /* ① 宣告：只说「X 提名 Y」，不说理由（理由由提名者本人被点名后再说） */
+          setStage('announce');
+          nomSay(id, '@' + nmF + ' 提名 @' + nmT + '。');
+          await sleep(400);
+          /* ② 请提名者说明理由 */
+          setStage('reason');
+          nomSay(id, '@' + nmF + ' 提名 @' + nmT + '，@' + nmF + ' 请说明理由。');
+          if (seatType(sC, c.from) === 'player') {
+            await waitStage(id, 'defense', NOM_ASK_WAIT_MS);
+          } else {
+            const rr = await askSeat(id, c.from, 'reason', { target:c.target+1, targetName:sC.seats[c.target].name, hint:c.reasonHint || '' });
+            const rtxt = (rr.parsed && rr.parsed.say) ? String(rr.parsed.say).trim() : '';
+            const finalReason = rtxt || c.reasonHint || '（没有说明理由）';
+            E.say(id, c.from, finalReason, 'town');
+            E.nomSpeech(id, 'reason', finalReason);
+          }
+          /* ③ 请被提名者反驳 */
+          const sD = E.loadState(id);
+          setStage('defense');
+          nomSay(id, '@' + nmT + ' 请反驳。');
+          if (seatType(sD, c.target) === 'player') {
             await waitStage(id, 'vote', NOM_ASK_WAIT_MS);
           } else {
-            const d = await askSeat(id, c.target, 'defense', { from:c.from+1, fromName:sC.seats[c.from].name, reason:c.reason });
+            const curD = E.loadState(id);
+            const reasonNow = (curD.nom && curD.nom.cur) ? String(curD.nom.cur.reason || '') : '';
+            const d = await askSeat(id, c.target, 'defense', { from:c.from+1, fromName:sD.seats[c.from].name, reason:reasonNow });
             const txt = (d.parsed && d.parsed.say) ? String(d.parsed.say).trim() : '';
             if (txt) { E.say(id, c.target, txt, 'town'); }
             E.nomSpeech(id, 'defense', txt || '（没有为自己辩护）');
@@ -1354,8 +1471,17 @@ function buildStoryChatPrompt(id, m) {
   const lines = [];
   lines.push('你是「血染钟鱼」的说书人。刚刚有人给你发了一条消息，请你判断是否需要回应。');
   lines.push(ST_TONE);
+  lines.push(FACTION_RULES);
   lines.push('私聊通常都要回：那是对方在向你提问、请你裁定、或向你透露信息。');
   lines.push('公聊要克制：没人问你、也没有必须公布的结果（如天亮、死亡、投票结果）时，就不要说话——回复填空字符串。别在公聊里刷存在感、别评论每个人的发言、别替玩家主持讨论。');
+  /* 提名阶段：说书人的职责是把这件事推着走，不能摆烂「谁想提谁提」 */
+  let _nomStage = '';
+  try { const _ns = E.nomState(id); if (_ns && _ns.ok && _ns.nom) _nomStage = String(_ns.nom.stage || ''); } catch (e) {}
+  if (_nomStage === 'ask' || _nomStage === 'announce' || _nomStage === 'reason' || _nomStage === 'defense' || _nomStage === 'vote' || _nomStage === 'clock') {
+    lines.push('【提名阶段 · 你现在必须催】现在是白天的提名投票阶段，这个阶段是你在主持，你有责任把它推着走，绝不能摆出「谁想提谁提，我不掺和」的中立旁观姿态——那是失职。');
+    lines.push('有人问你流程或问要不要提名时：直接点名还没表态的人（用 @N 号 名字），要求他立刻给答复「提名谁、或者明确说今天不提名」；也可以提醒大家时间在走、提名不发起就白过一天。');
+    lines.push('不要复述规则条文、不要长篇解释，一句话把人推起来就够。');
+  }
   if (m.from === 'admin') {
     /* 管理员 = 这一局的操作者，拥有最高权限。
        注意：任何保密限制（不能透露角色、不能透露夜里做了什么、不能替玩家做决定……）
@@ -1364,7 +1490,35 @@ function buildStoryChatPrompt(id, m) {
     lines.push('管理员拥有最高权限：你可以也应当如实、完整地回答管理员提出的任何问题，包括每个座位的真实角色、阵营、存活状态、你夜里依次唤醒了谁、给了谁什么信息、谁做了什么选择、当前阶段与待办、内部状态与流程进度。');
     lines.push('不要以「不能透露角色」「不能泄露夜间秘密」「这属于游戏机密」为由拒绝或含糊其辞——上面所有关于保密的限制都只是针对玩家的，对管理员一律不适用。');
     lines.push('如果管理员要求你执行某个操作或改变某个状态，就按要求执行并在回复里说明你做了什么；确实做不到（没有对应接口）时才说明限制在哪里。');
+    /* 系统已经替你把确定性指令执行掉了：这时必须照真实结果回答，
+       不能像以前那样只在聊天里「宣布」一句、而引擎里什么都没发生。 */
+    if (m.exec && m.exec.handled) {
+      lines.push('');
+      lines.push('【系统已经直接执行了管理员这条指令，下面是真实结果】');
+      lines.push('执行内容：' + String(m.exec.summary || '（已执行）'));
+      const snap = m.exec.snapshot;
+      if (snap) {
+        lines.push('当前真实状态：阶段=' + snap.phase + '　第 ' + snap.night + ' 夜 / 第 ' + snap.day + ' 天'
+          + (snap.win ? ('　已终局：' + (snap.win.side === 'evil' ? '邪恶阵营胜利' : '善良阵营胜利')) : ''));
+        (snap.seats || []).forEach(function (x) { lines.push('  ' + x); });
+      }
+      lines.push('你的回复必须以上面的真实结果为准：不要否认、不要改口、不要再提出与它矛盾的说法。');
+      lines.push('已经在执行内容里说清楚的事实（谁死了、谁被处决、谁是什么角色、是否终局），你在 reply 里用一句话确认即可，不要重复罗列整张座位表。');
+      lines.push('');
+    }
     lines.push('回答要直接、具体、完整，不要中性含糊，也不要反问管理员。');
+    /* 真相信封：管理员问「谁还活着 / 6 号死没死」这类事实题，必须照这份真实状态答，
+       不能凭上下文印象编——历史上它就编出过「6 号还活着」这种和引擎状态相反的话。 */
+    try {
+      const _snap = E.adminSnapshot(id);
+      lines.push('');
+      lines.push('【当前真实状态（以下为引擎里的权威数据，回答任何事实问题都必须以此为准）】');
+      lines.push('阶段=' + _snap.phase + '　第 ' + _snap.night + ' 夜 / 第 ' + _snap.day + ' 天'
+        + (_snap.win ? ('　已终局：' + (_snap.win.side === 'evil' ? '邪恶阵营胜利' : '善良阵营胜利') + '（' + (_snap.win.reason || '') + '）') : '　对局进行中'));
+      (_snap.seats || []).forEach(function (x) { lines.push('  ' + x); });
+      lines.push('如果上面写着某人已死亡，那他就是死了；如果写着已终局，那就是已经结束了。不许说反。');
+      lines.push('');
+    } catch (e) {}
   } else {
     lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节、你唤醒了谁）。');
   }
@@ -1381,6 +1535,24 @@ function buildStoryChatPrompt(id, m) {
     lines.push((x.seat + 1) + ' 号：' + x.name + (x.alive ? '（存活）' : '（已死亡）') + ' 角色=' + (x.role || '未分配'));
   });
   lines.push('');
+  /* 不能只看这一条：要带上最近的公开对话与提名进展，否则说书人会忘掉前文、答不到点上 */
+  try {
+    const _recent = (stt.messages || []).filter(function (x) { return x.channel !== 'private' || x.from === 'storyteller' || (Array.isArray(x.to) && x.to.indexOf('storyteller') >= 0); }).slice(-24);
+    if (_recent.length) {
+      lines.push('【最近的对话与场面】');
+      lines.push(renderMessages(_recent, stt.seats));
+      lines.push('');
+    }
+  } catch (e) {}
+  try {
+    const _ns2 = E.nomState(id);
+    if (_ns2 && _ns2.ok && _ns2.nom) {
+      lines.push('【提名阶段进展】阶段=' + String(_ns2.nom.stage || 'idle')
+        + '　今天被提名过=' + (Object.keys(_ns2.nom.usedTarget || {}).map(function (k) { return (Number(k) + 1) + ' 号'; }).join('、') || '无')
+        + '　当前在处决台=' + (_ns2.nom.onBlock ? ((_ns2.nom.onBlock.target + 1) + ' 号') : '无'));
+      lines.push('');
+    }
+  } catch (e) {}
   lines.push('【刚刚收到的消息】');
   lines.push('来自：' + (m.from === 'admin' ? '管理员' : (m.from === 'storyteller' ? '你自己' : ((Number(m.from) + 1) + ' 号 ' + ((v.seats[m.from] || {}).name || ''))))
     + '　频道：' + (m.channel === 'private' ? '私聊' : '公聊'));

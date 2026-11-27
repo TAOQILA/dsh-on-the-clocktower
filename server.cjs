@@ -95,12 +95,22 @@ function buildApi(opts){
   say: (b) => {
     /* 「/管理员 内容」= 最高权限指令：不当作普通聊天，转成管理员私聊直接下达给说书人，
        并要求说书人如实回答、按指令操作。公聊里只留一行提示，不泄露管理员问了什么。 */
-    const adminText = String(b.text || '').match(/^\s*[\/／]\s*管理员[\s:：,，]*([\s\S]*)$/);
+    /* 最高权限指令前缀（全部等价、忽略大小写）：
+       /admin /ad /a /ch /cheat /c /z /zb /g /gl /gly
+       /管理员 /管理 /作弊 /作 —— 长短写法都认，但前缀后面必须是空白、冒号或结尾，
+       这样 /abcdef 之类的半截词不会被误判成指令。 */
+    const ADMIN_ALIAS = '(?:admin|cheat|gly|gl|zb|ad|ch|a|c|z|g|管理员|管理|作弊|作)';
+    const adminRe = new RegExp('^\\s*[\\/／]\\s*' + ADMIN_ALIAS + '(?=$|[\\s:：,，])\\s*[:：,，]?\\s*([\\s\\S]*)$', 'i');
+    const adminText = String(b.text || '').match(adminRe);
     if (adminText) {
       const q = adminText[1].trim();
       if (q) {
         try {
-          const ar = E.adminSay(b.id, q, b.seat);
+          /* 能被确定性解析的指令（处决/杀死/复活/改角色/终局/推进阶段）由引擎直接执行，
+             不指望模型自己记得调接口——历史上它就只在聊天里「宣布」了一句，游戏状态没动。 */
+          let _exec = null;
+          try { _exec = E.adminExecute(b.id, q); } catch (e) { _exec = null; }
+          const ar = E.adminSay(b.id, q, b.seat, _exec);
           /* 公聊里下达的指令只在公聊留一行提示；私聊里下达的就保持私聊，不要把内容捅到公聊 */
           if (b.channel !== 'private') {
             E.say(b.id, b.seat === 'storyteller' ? 'storyteller' : b.seat, '（向说书人下达了管理员指令）', 'town');
@@ -129,7 +139,13 @@ function buildApi(opts){
     if (r && r.ok && r.message) {
       const m = r.message;
       const toSt = (Array.isArray(m.to) && m.to.indexOf('storyteller') >= 0) || m.to === 'storyteller';
-      const addressed = /说书人|主持人|@\s*说书/.test(String(m.text || ''));
+      /* 怎么算「叫到说书人」：说书人/主持人这类通用称呼，或者直接喊出本局说书人的名字（含简称），
+         不必@全名——玩家喊「@肥鱼」也应该被听见。 */
+      const _stName = String((E.loadState(b.id).storyteller || {}).name || '');
+      const _short = _stName.replace(/说书人|主持人|Agent|AI|agent|ai/g, '').trim();
+      const addressed = /说书人|主持人|@\s*说书/.test(String(m.text || ''))
+        || (_stName && String(m.text || '').indexOf(_stName) >= 0)
+        || (_short.length >= 1 && String(m.text || '').indexOf(_short) >= 0);
       const need = (m.channel === 'private') ? toSt : addressed;
       if (need && m.from !== 'storyteller') { try { A.storyReply(b.id, m); } catch (e) {} }
     }

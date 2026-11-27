@@ -30,8 +30,8 @@ export const inject = []
 
 const MOUNT = '/dsh-on-the-clocktower'
 const PORT = Number(process.env.RAN_PORT || 6325) // 仅兜底独立进程模式；主入口走同源路由
-const MAX_TOKENS = 2400
-const VERSION = '0.15.7'
+const MAX_TOKENS = 900 /* 默认输出上限：回包只是一个短 JSON，给太长会拖慢 */
+const VERSION = '0.15.9'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -84,7 +84,7 @@ function makeLlmCall(ctx) {
     const options = {
       messages: [userMessage(String(request && request.prompt ? request.prompt : ''))],
       system: String((request && request.system) || ''),
-      maxTokens: MAX_TOKENS,
+      maxTokens: (request && Number(request.maxTokens) > 0) ? Number(request.maxTokens) : MAX_TOKENS,
       purpose: 'dsh-on-the-clocktower',
     }
     if (route) {

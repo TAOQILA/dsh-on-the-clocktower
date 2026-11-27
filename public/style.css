@@ -82,6 +82,9 @@ body.night .seat .nameline{background:rgba(8,7,20,calc(.32 * var(--panel-alpha) 
 .seat .name{font-size:13px;color:#d8c8a8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seat .markers{font-size:12px;color:#ff8c7a}
 .demontag{position:absolute;right:-4px;top:-4px;font-size:11px;background:#000;color:#ff6b6b;border-radius:50%;padding:1px 4px}
+/* 还有死亡票：十字架亮起来；票已用掉就暗下去 */
+.demontag.hasvote{background:#c9a227;color:#241a00;font-weight:900;box-shadow:0 0 7px rgba(201,162,39,.85)}
+.demontag.spent{background:#000;color:#6b4a4a;opacity:.55}
 .section{margin-bottom:20px}.section h3{font-size:15px;color:var(--gold);margin:0 0 10px;border-bottom:1px solid #4a3c28;padding-bottom:6px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .seatlist{display:flex;flex-wrap:wrap;gap:5px}
@@ -184,7 +187,8 @@ body.night .inboxitem{background:#12102a}
 .bubbles{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);width:250px;max-height:130px;overflow:hidden;display:flex;flex-direction:column-reverse;gap:4px;margin-bottom:6px;pointer-events:none;z-index:5}
 .bubble{font-size:12px;line-height:1.45;padding:7px 11px;border-radius:12px;background:#2a2118;border:1px solid #5b4a30;color:#f0e4c8;text-align:left;box-shadow:0 3px 10px rgba(0,0,0,.6);word-break:break-word;max-height:74px;overflow:hidden;transition:font-size .12s}
 .bubble.clipped::after{content:"…";opacity:.6}
-.bubbles.stbub{width:220px}
+.bubbles.stbub{width:220px;left:0;transform:none;bottom:auto;top:100%;margin-bottom:0;margin-top:6px;flex-direction:column}
+.bubbles.stbub .bubble{text-align:left}
 .bubble.dm{background:#3a2f5c;border-color:#7a68d8;color:#ece6ff}
 .bubble .dmtag{display:inline-block;font-size:9px;font-weight:900;color:#0f0b1e;background:#9c8fe0;border-radius:4px;padding:0 4px;margin-right:3px;vertical-align:1px}
 .bubble .dmto{color:#b9aef0}
@@ -214,6 +218,7 @@ body.night .mention{color:#c9b8ff;background:rgba(201,184,255,.12)}
 .msg .mtag{font-size:10px;font-weight:900;color:#0f0b1e;background:#9c8fe0;border-radius:5px;padding:0 5px;margin-right:4px;vertical-align:2px}
 .msg{margin-bottom:12px}
 .mtext{margin-top:4px}
+.seatref{font-weight:700}
 .selfpron{font-weight:900}
 .msg .mention{font-weight:900;background:transparent;padding:0}
 .center-badge .scriptline{font-size:13px;color:var(--parch);opacity:.85;margin:2px 0;letter-spacing:1px}
@@ -398,6 +403,12 @@ body.night .compitem{opacity:.85}
 
 .adminbadge{background:#1d4d6b;color:#cdeaff;border:1px solid #3d7ea6}
 body.night .adminbadge{background:#22335c;color:#cfe0ff;border-color:#4a5f9a}
+.cheattip{margin:10px 0;padding:10px 12px;border-radius:10px;background:rgba(143,211,255,.10);border:1px solid rgba(143,211,255,.32);font-size:13px;line-height:1.7}
+body.night .cheattip{background:rgba(120,150,255,.13);border-color:rgba(140,160,255,.36)}
+.cheattip code{background:rgba(255,255,255,.12);border-radius:5px;padding:1px 5px;font-size:12px}
+.thinking{margin-top:2px;font-size:11px;line-height:1.3;color:#ffd76a;opacity:.95;letter-spacing:.5px;animation:thinkPulse 1.2s ease-in-out infinite}
+@keyframes thinkPulse{0%,100%{opacity:.45}50%{opacity:1}}
+body.night .thinking{color:#b9c6ff}
 /* 私聊：微信式的会话列表 + 单个对话（一个框整体替换，不是筛选） */
 .dmlist{flex:1;overflow-y:auto;padding:4px 2px}
 .dmconv{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:9px;cursor:pointer;transition:background .15s ease}
@@ -418,6 +429,15 @@ body.night .dmconv.unread{background:rgba(255,120,140,.10);border-color:rgba(255
 body.night .dmback{background:rgba(156,143,224,.16);border-color:rgba(156,143,224,.34)}
 
 /* 投票：你自己的举手按钮要一眼能找到 */
+.nomfloat{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:7;
+  display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 16px;border-radius:14px;
+  background:rgba(20,16,12,.82);border:1px solid rgba(201,162,39,.45);box-shadow:0 8px 28px rgba(0,0,0,.45);
+  backdrop-filter:blur(8px);max-width:min(560px,88vw);pointer-events:auto}
+body.night .nomfloat{background:rgba(12,10,26,.86);border-color:rgba(156,143,224,.48)}
+.nomfloattip{font-size:14px;font-weight:800;color:#f0e2bb;text-align:center;line-height:1.4}
+body.night .nomfloattip{color:#dfe2ff}
+.nomfloatbtns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.nomfloat .nomhand-up,.nomfloat .nomhand-down{min-width:132px;font-size:15px;padding:9px 14px}
 .nomvotebox{margin-top:8px;padding:10px;border-radius:10px;background:rgba(201,162,39,.10);border:1px solid rgba(201,162,39,.30)}
 body.night .nomvotebox{background:rgba(156,143,224,.12);border-color:rgba(156,143,224,.34)}
 .nomvotecur{font-weight:900;margin-bottom:7px}
