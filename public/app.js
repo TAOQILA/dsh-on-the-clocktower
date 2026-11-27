@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.13.2';
+var VERSION = '0.13.3';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -23,7 +23,7 @@ async function api(name, data){
 var S = { scripts:[], script:null, seats:[], game:null, history:null, me:{zone:'spectator',seat:0}, holdMe:false, storyName:'说书人', storyProvider:'', storyModel:'', tab:'game', selSeat:0, chatChannel:'town', chatTo:[], chatLoading:false, models:null, starting:false, startError:'', view:null, story:null, wikiPage:null, wikiText:null, wikiNames:[], wikiCache:null, chatMsgs:[], chatSeen:0, chatUnread:0, dmUnread:0, namesPool:[], chatDraft:'', pendingRender:false, autoChat:true, autoStory:true, hideChat:true, hideDm:false, mentionOpen:false, lastPhase:'', showDm:false, dmDraft:'', dmTo:[], activeInput:'town', mentionList:[], mentionWhich:'town',
   fontScale:1, chatFade:true, showTimer:true, showBubbles:true, nightTheme:true, compactTabs:false, showScriptLine:true,
   bgOn:true, bgBlur:7.5, bgBright:20, panelAlpha:40, hideSide:true,
-  storyLog:null, storyLogAt:0, aiStyle:'mild_fun' };
+  storyLog:null, storyLogAt:0, aiStyle:'mild_fun', roleMode:'program', ending:false };
 var PHASES = ['setup','night','day','nomination','vote','dawn','ended'];
 var PHZH = {setup:'准备',night:'夜晚',day:'白天',nomination:'提名',vote:'投票',dawn:'日落',ended:'终局'};
 var TABS = {setup:'开局',ai:'AI 设置',log:'日志',wiki:'知识库',game:'游戏',story:'说书人',cheat:'作弊',settings:'设置'};
@@ -83,6 +83,7 @@ function savePrefs(){
       bgBright: (typeof S.bgBright === 'number' ? S.bgBright : 20),
       me: { zone: meZone(), seat: (S.me && S.me.seat) || 0 },
       aiStyle: S.aiStyle || 'mild_fun',
+      roleMode: S.roleMode || 'program',
       activeGame: S.game ? S.game.id : '',
       activeGameSt: S.game ? iAmStoryteller(S.game) : false,
       seats: (S.seats || []).map(function(x){ return { name:x.name||'', type:x.type||'agent', provider:x.provider||'', model:x.model||'' }; })
@@ -109,6 +110,7 @@ function loadPrefs(){
     S.storyName = o.storyName || '说书人';
     S.storyProvider = o.storyProvider || '';
     S.storyModel = o.storyModel || '';
+    S.roleMode = (o.roleMode === 'storyteller') ? 'storyteller' : 'program';
     S.hideDm = o.hideDm === true;
     if (Array.isArray(o.seats) && o.seats.length >= 5 && o.seats.length <= 30) {
       S.seats = o.seats.map(function(x,i){
@@ -793,7 +795,7 @@ async function startGame(){
   var seatsNew = S.seats.map(function(s,i){
     return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
   });
-  var cfg = { script:S.script.name, seats:seatsNew, aiStyle:(S.aiStyle||'mild_fun'),
+  var cfg = { script:S.script.name, seats:seatsNew, aiStyle:(S.aiStyle||'mild_fun'), roleMode:(S.roleMode||'program'),
     storyteller:(zone==='story')
       ? {type:'player',name:'我'}
       : {type:'agent',name:(S.storyName||'说书人'),provider:S.storyProvider||'',model:S.storyModel||''} };
@@ -854,7 +856,7 @@ function seatPanel(seats,sel){
 function storyPanel(seats,sel,roles,phase){
   if (!S.game) return '<p class="muted">请先在「建局」中创建对局。</p>';
   if (S.game.win && S.game.win.over) return '<p class="muted">本局已结束。可到「日志」里回看，或在「建局」里开新局。</p>';
-  if (!iAmStoryteller(S.game)) return '<div class="section"><h3>说书人</h3><p class="muted">本局说书人由 Agent「'+S.game.storyteller.name+'」担任，你没有主持人权限。</p></div>'+ agentStorySection();
+  if (!iAmStoryteller(S.game)) return '<div class="section"><h3>说书人</h3><p class="muted">本局说书人由 Agent「'+S.game.storyteller.name+'」担任，你没有主持人权限。</p></div>'+ agentStorySection() + (canControl() ? agentEndRow() : '');
   return humanStoryPanel(seats,sel,roles,phase) + agentEndRow();
 }
 /* 说书人为 Agent 时：让 Agent 主持夜晚/白天 */
@@ -891,7 +893,8 @@ function agentEndRow(){
   return '<div class="section"><h3>结束对局</h3>'+
     '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
     '<input id="winReason" placeholder="原因（可选）" style="flex:1">'+
-    '<button onclick="doEndGame()">宣布终局</button></div></div>';
+    '<button onclick="doEndGame()">宣布终局</button></div>'+
+    '<div class="muted">Agent 说书人会先把全场复盘（每个人的真实角色与关键夜晚）发到公聊，然后才宣布终局。</div></div>';
 }
 function humanStoryPanel(seats,sel,roles,phase){
   var roleOpts = '<option value="">—</option>'+roles.map(function(r){ return '<option>'+r+'</option>'; }).join('');
@@ -941,7 +944,11 @@ async function doEndGame(){
   if(!S.game) return;
   var side = ($('#winSide')||{}).value || 'good';
   var reason = ($('#winReason')||{}).value || '';
-  try { await api('endGame',{id:S.game.id, side:side, reason:reason}); } catch(e){ S.startError=String((e&&e.message)||e); }
+  S.ending = true; render(true);
+  try { await api('endGame',{id:S.game.id, side:side, reason:reason}); }
+  catch(e){ S.startError=String((e&&e.message)||e); }
+  S.ending = false;
+  await loadChat();
   await refresh();
 }
 /* 模型面板：只放说书人自己的模型；各座位模型在「魔典」页点座位改。 */
@@ -990,7 +997,13 @@ function cheatPanel(seats, sel){
   h += '<div class="cheatgrp"><h4>死亡与终局</h4>'+
     '<div class="row"><button onclick="if(confirm(\'确定处决该座位？处决后会立刻进入夜晚。\'))api(\'execute\',{id:S.game.id,seat:S.selSeat}).then(refresh)">处决该座位（立刻入夜）</button></div>'+
     '<div class="row"><button onclick="if(confirm(\'确定杀死该座位？普通死亡不会立刻入夜。\'))api(\'kill\',{id:S.game.id,seat:S.selSeat,reason:\'作弊杀死\'}).then(refresh)">杀死该座位（不立即入夜）</button></div>'+
-    '<div class="row"><button onclick="if(confirm(\'确定宣布本局结束？\'))doEndGame()">宣布终局</button></div></div>';
+    '<div class="row"><select id="winSide"><option value="good">善良阵营胜利</option><option value="evil">邪恶阵营胜利</option></select>'+
+    '<input id="winReason" class="smname-input" placeholder="原因（可选）">'+
+    '<button onclick="if(confirm(\'确定宣布本局结束？说书人会先发复盘再终局。\'))doEndGame()">宣布终局</button></div></div>';
+  h += '<div class="cheatgrp"><h4>以管理员身份私聊说书人</h4>'+
+    '<div class="row"><input id="adminSay" class="smname-input" placeholder="只有说书人能看到这句话；它会考虑并回复你">'+
+    '<button onclick="adminSay()">发送</button></div>'+
+    '<div class="muted">用于直接向 Agent 说书人下达裁定、询问状态或纠错，不会出现在公聊。</div></div>';
   h += '<div class="cheatgrp"><h4>说书人日志</h4>'+ storyLogHtml() +'</div>';
   h += '</div>';
   return h;
@@ -1002,7 +1015,14 @@ async function cheatSpeak(){
   inp.value=''; await loadChat(); render();
 }
 async function cheatRound(){ await reactAll(); }
-async function cheatStory(){ await runStory(); }
+async function cheatStory(){ await runStory(); }
+async function adminSay(){
+  var inp = document.getElementById('adminSay'); if(!inp) return;
+  var txt = (inp.value||'').trim(); if(!txt) return;
+  try { var r = await api('adminSay',{id:S.game.id, text:txt}); if(r&&r.ok===false) S.startError=r.error; }
+  catch(e){ S.startError=String((e&&e.message)||e); }
+  inp.value=''; await loadStoryLog(); await loadChat(); render(true);
+}
 /* 说书人日志：把它的完整思考与操作按时间顺序摊开，作弊页实时查看 */
 function storyLogHtml(){
   var rows = S.storyLog;
@@ -1054,6 +1074,7 @@ function settingsPanel(){
       sw('showBubbles','头像上方显示聊天气泡','只显示最近一条，20 秒后自动淡出。')+
       sw('showScriptLine','圆桌中心显示剧本名','')+
     '</div>'+
+    '<div class="section"><h3>设置 · 角色决定</h3>'+roleModeSelect()+'</div>'+
     '<div class="section"><h3>设置 · AI 风格</h3>'+styleSel+'</div>'+
     '<div class="section"><h3>设置 · 自动流程</h3>'+
       sw('autoChat','进入白天时自动讨论','阶段切到白天时，AI 们自动接一轮话。')+
@@ -1087,6 +1108,27 @@ function modelStyleSelect(){
     +'<select onchange="setAiStyle(this.value)">'+opts+'</select>'
     +'<div class="muted">极左更严肃理性，极右更轻松娱乐；不影响推理内容，只影响语气。</div>'
     + tail + '</div>';
+}
+/* 角色决定：程序（机械随机配比发牌）或说书人（由 Agent 依剧本自行分配） */
+function roleModeSelect(){
+  var cur = S.roleMode || 'program';
+  return '<div class="setrow"><div>由谁决定每个人的角色</div>'+
+    '<select onchange="setRoleMode(this.value)">'+
+    '<option value="program"'+(cur==='program'?' selected':'')+'>由程序决定（机械随机，按人数配比）</option>'+
+    '<option value="storyteller"'+(cur==='storyteller'?' selected':'')+'>由说书人决定</option>'+
+    '</select>'+
+    '<div class="muted">「由程序决定」会按剧本的人数配比随机发牌，绝不会给一个人两个角色；说书人只负责夜间信息与裁定。</div>'+
+    (S.game && S.game.id ? '<div class="muted">本局已开始：切换只影响之后的发牌，已发出的角色不会改动。</div>' : '')+
+    '</div>';
+}
+async function setRoleMode(mode){
+  S.roleMode = (mode === 'storyteller') ? 'storyteller' : 'program';
+  savePrefs();
+  if (S.game && S.game.id) {
+    try { await api('setRoleMode',{ id:S.game.id, mode:S.roleMode }); }
+    catch(e){ S.startError = String((e && e.message) || e); }
+  }
+  render(true);
 }
 async function setAiStyle(key){
   S.aiStyle = key || 'mild_fun';
@@ -1200,7 +1242,12 @@ function canControl(){
   return iAmStoryteller(S.game) || iAmPlayer(S.game);
 }
 /* 读取对局时带上视角，非说书人不会拿到中毒/醉酒等隐藏标记 */
-function gameReq(){ return { id:S.game.id, storyteller:iAmStoryteller(S.game) }; }
+function gameReq(){
+  var req = { id:S.game.id, storyteller:iAmStoryteller(S.game) };
+  var ms = mySeatInGame(S.game);
+  if (ms >= 0) req.seat = ms;
+  return req;
+}
 /* 打开/创建对局后，把「你」的摆放同步成这一局里的真实身份 */
 function syncMeFromGame(g){
   if(!g) return;

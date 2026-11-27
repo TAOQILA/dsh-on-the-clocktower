@@ -73,6 +73,12 @@ function buildApi(opts){
       s.markers = (s.seats || []).map(function () { return []; });
       /* 日志里分配角色、改模型这类条目会暴露身份，非说书人视角一律过滤 */
       s.log = (s.log || []).filter(function (x) { return !x.priv; });
+      /* 角色属于底牌：对局进行中只把「自己那一张」下发，终局后全部公开 */
+      if (!(s.win && s.win.over)) {
+        const mineSeat = Number(q.seat);
+        const mineRole = (isFinite(mineSeat) && mineSeat >= 0) ? (s.roles || {})[mineSeat] : undefined;
+        s.roles = (mineRole !== undefined) ? (function () { const o = {}; o[mineSeat] = mineRole; return o; })() : {};
+      }
     }
     return s;
   },
@@ -91,6 +97,12 @@ function buildApi(opts){
     return r;
   },
   messages: (b) => ({ messages: E.messages(b.id, b.viewer, !!b.storyteller) }),
+  /* 管理员以管理员身份私聊说书人：消息只有说书人看得到，同时立刻交给说书人思考并回复 */
+  adminSay: (b) => {
+    const r = E.adminSay(b.id, b.text);
+    if (r && r.ok && r.message) { try { A.storyReply(b.id, r.message); } catch (e) {} }
+    return r;
+  },
   think: (b) => E.think(b.id,b.seat,b.text),
   nominate: (b) => E.nominate(b.id,b.from,b.target),
   vote: (b) => E.vote(b.id,b.seat,b.target),
@@ -99,7 +111,14 @@ function buildApi(opts){
   marker: (b) => E.toggleMarker(b.id,b.seat,b.marker),
   seatModel: (b) => E.setSeatModel(b.id, b.seat, b.provider, b.model, b.name),
   checkWin: (b) => E.checkWin(b.id),
-  endGame: (b) => E.endGame(b.id, b.side, b.reason),
+  /* 宣布终局：Agent 说书人先把全场复盘发到公聊，然后才落终局；人类说书人直接终局 */
+  endGame: async (b) => {
+    try {
+      const r = await A.storyRecap(b.id, b.side, b.reason);
+      if (r && r.ok) return { ok:true, win:r.win, recap:r.recap };
+    } catch (e) {}
+    return E.endGame(b.id, b.side, b.reason);
+  },
   /* 可用的模型目录：由宿主端注入（读 DSH 的 provider/model 清单） */
   models: async () => {
     if (typeof opts.listModels === 'function') {
@@ -117,6 +136,8 @@ function buildApi(opts){
   storyRound: (b) => A.runStoryteller(b.id, b),
   storyLog: (b) => E.storyLog(b.id),
   setStyle: (b) => E.setStyle(b.id, b.style),
+  setRoleMode: (b) => E.setRoleMode(b.id, b.mode),
+  dealRoles: (b) => E.dealRoles(b.id),
   openVote: (b) => E.openVote(b.id, b.target),
   castVote: (b) => E.castVote(b.id, b.seat, b.yes !== false),
   resolveVote: (b) => E.resolveVote(b.id),

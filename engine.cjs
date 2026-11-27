@@ -43,6 +43,7 @@ function createGame(cfg){
     phase: 'setup', night: 0, day: 0, turn: 0,
     storyteller: cfg.storyteller, seats: cfg.seats,
     aiStyle: cfg.aiStyle || 'mild_fun',
+    roleMode: cfg.roleMode || 'program',
     roles: {}, alive: {}, markers: {}, info: {}, nominations: [], votes: {}, messages: [],
     log: [], readAcks: []
   };
@@ -114,6 +115,9 @@ function assignRole(id, seat, role){
 }
 function giveInfo(id, seat, text){
   const s = loadState(id);
+  /* 同一座位不重复发同一条角色告知（程序发牌后说书人可能又想发一遍，会造成一人两个角色） */
+  const dup = (s.info[seat] || []).some(function(x){ return String(x.text || '').trim() === String(text || '').trim(); });
+  if (dup) return { ok:true, skipped:true };
   /* night/day 记录发放时刻：夜里得到的信息，要到下一个白天才能公开讨论 */
   (s.info[seat]=s.info[seat]||[]).push({t:new Date().toISOString(), text, night:s.night, day:s.day, phase:s.phase});
   /* 说书人的信息由说书人「亲自私聊」发给该座位：直接落一条 private 消息（不走 say()，因为夜里私聊通道对玩家关闭，说书人下发信息不受此限） */
@@ -298,12 +302,25 @@ function say(id, seat, text, channel, to){
   });
   return {ok:true, message:msg};
 }
+/* 管理员私聊说书人：以 from='admin' 的身份投递一条私聊，只有说书人能看到 */
+function adminSay(id, text){
+  const s = loadState(id);
+  if (!Array.isArray(s.messages)) s.messages = [];
+  const msg = { t:new Date().toISOString(), from:'admin', channel:'private', to:['storyteller'], text:String(text||'') };
+  s.messages.push(msg);
+  saveState(id, s);
+  log(id, '管理员', '[私聊说书人] ' + msg.text);
+  return { ok:true, message:msg };
+}
+
 /* 按视角过滤消息：town 全员可见；private 仅发件人、收件人、说书人可见 */
 function messages(id, viewer, isStoryteller){
   const s = loadState(id);
   if (!Array.isArray(s.messages)) s.messages = [];
   return s.messages.filter(function(m){
     if (m.channel!=='private') return true;
+    /* 管理员私聊说书人：只有说书人视角看得到，玩家/旁观者都看不到 */
+    if (m.from==='admin' || (Array.isArray(m.to) && m.to.indexOf('admin')>=0)) return !!isStoryteller;
     if (isStoryteller || m.from===viewer) return true;
     return Array.isArray(m.to) && m.to.indexOf(viewer)>=0;
   });
@@ -325,6 +342,85 @@ function setSeatModel(id, seat, provider, model, name){
 
 
 /* 一步完成：创建 + Agent 阅读回执 + 进入第一夜（避免前端多次往返造成的卡死） */
+/* ---------- 程序发牌 ----------
+   角色表由程序机械、随机地生成，不经过说书人的自由裁量：
+   1) 按人数决定 镇民/外来者/爪牙/恶魔 的配比；
+   2) 从本剧本对应阵营里随机抽取，不重复；
+   3) 能力描述里带 [..] 的角色（例如 男爵 [+2 外来者]、无神论者 [无邪恶角色在场]）会改变配比，
+      这里按最常见的写法做机械修正：遇到 [+N 外来者] 就加外来者、减镇民；遇到 [-N 外来者] 反之；
+   4) 抽完随机分配到座位，并把「你的角色是【X】」私聊发给每个人。
+   roleMode='storyteller' 时不做任何处理，全部交由说书人 Agent 自己决定。 */
+function scriptData(name){
+  const p = path.join(__dirname, 'data', 'scripts', name + '.json');
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e){ return null; }
+}
+function compositionFor(n){
+  const table = { 5:[3,0,1,1], 6:[3,1,1,1], 7:[5,0,1,1], 8:[5,1,1,1], 9:[5,2,1,1], 10:[7,2,1,1],
+                  11:[7,2,1,1], 12:[7,2,1,1], 13:[9,2,1,1], 14:[9,3,1,1], 15:[9,3,1,1] };
+  if (table[n]) return table[n].slice();
+  if (n < 5) return [n-2, 0, 1, 1];
+  const townsfolk = n - 2 - Math.max(1, Math.floor((n-7)/3));
+  return [Math.max(1, townsfolk), Math.max(0, n - townsfolk - 2), 1, 1];
+}
+function shuffle(a){
+  const out = a.slice();
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = out[i]; out[i] = out[j]; out[j] = t; }
+  return out;
+}
+/* 程序发牌：返回 { ok, roles, roster }；roster 是给说书人看的「几号是谁」清单 */
+function dealRoles(id){
+  const s = loadState(id);
+  const sc = scriptData(s.script);
+  if (!sc) return { ok:false, error:'找不到剧本：' + s.script };
+  const g = sc.groups || {};
+  const pool = { 镇民: (g['镇民']||[]).slice(), 外来者: (g['外来者']||[]).slice(), 爪牙: (g['爪牙']||[]).slice(), 恶魔: (g['恶魔']||[]).slice() };
+  const n = (s.seats || []).length;
+  if (!n) return { ok:false, error:'没有座位' };
+  const comp = compositionFor(n);          /* [镇民, 外来者, 爪牙, 恶魔] */
+  /* 先抽爪牙与恶魔：它们的 [..] 括号会反过来改外来者数量 */
+  const minions = shuffle(pool['爪牙']).slice(0, comp[2]);
+  const demons  = shuffle(pool['恶魔']).slice(0, comp[3]);
+  /* 带 [..] 的角色对配比做机械修正 */
+  let bonusOutsider = 0;
+  minions.concat(demons).forEach(function(name){
+    const r = roleInfoByName(name);
+    const ab = (r && r.ability) || '';
+    let m = ab.match(/\[\s*\+\s*(\d+)\s*外来者/);
+    if (m) bonusOutsider += Number(m[1]);
+    m = ab.match(/\[\s*-\s*(\d+)\s*外来者/);
+    if (m) bonusOutsider -= Number(m[1]);
+    m = ab.match(/\[\s*\+\s*(\d+)\s*爪牙/);
+    if (m) { /* 额外爪牙：从爪牙池继续补抽，体现在下面 */ }
+  });
+  let [nt, no, nm, nd] = comp;
+  no = Math.max(0, no + bonusOutsider);
+  nt = Math.max(0, n - no - minions.length - demons.length);
+  const towns = shuffle(pool['镇民']).slice(0, nt);
+  const outs  = shuffle(pool['外来者']).slice(0, no);
+  const bag = shuffle(towns.concat(outs, minions, demons));
+  /* 人数与角色池对不上时（剧本角色太少），用现有角色循环补足 */
+  while (bag.length < n && bag.length > 0) { bag.push(bag[Math.floor(Math.random() * bag.length)]); }
+  const picked = bag.slice(0, n);
+  s.roles = {};
+  s.seats.forEach(function (x, i) { s.roles[i] = picked[i]; });
+  saveState(id, s);
+  log(id, '系统', '程序发牌：' + picked.join('、'), true);
+  /* 一次把「你的角色是【X】」发给每个人（giveInfo 自带去重，不会重复发） */
+  s.seats.forEach(function (x, i) { giveInfo(id, i, '你的角色是【' + picked[i] + '】。'); });
+  const roster = s.seats.map(function (x, i) { return (i+1) + ' 号 ' + x.name + '：' + picked[i]; });
+  return { ok:true, roles: picked, roster: roster };
+}
+function roleInfoByName(name){
+  try {
+    if (!ROLE_LIST_CACHE) {
+      const raw = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'roles.json'), 'utf8'));
+      ROLE_LIST_CACHE = Array.isArray(raw) ? raw : (raw.roles || Object.values(raw));
+    }
+    return ROLE_LIST_CACHE.find(function(r){ return r && (r.name === name || r.id === name); }) || null;
+  } catch(e){ return null; }
+}
+let ROLE_LIST_CACHE = null;
 function createAndStart(cfg){
   const s = createGame(cfg);
   const idxFile = path.join(__dirname, 'data', 'wiki', 'INDEX.md');
@@ -335,7 +431,22 @@ function createAndStart(cfg){
   });
   const r = start(s.id);
   if (r && r.ok === false) return r;
+  /* 默认由程序机械、随机地发牌；roleMode='storyteller' 时留给说书人 Agent 决定 */
+  const st0 = loadState(s.id);
+  if ((st0.roleMode || 'program') === 'program') {
+    const d = dealRoles(s.id);
+    if (!d || d.ok === false) log(s.id, '系统', '程序发牌失败：' + ((d && d.error) || '未知原因'), true);
+  }
   return loadState(s.id);
+}
+
+/* 切换角色决定方式：program=程序机械随机发牌（默认），storyteller=交由说书人 Agent 决定 */
+function setRoleMode(id, mode){
+  const s = loadState(id);
+  s.roleMode = (mode === 'storyteller') ? 'storyteller' : 'program';
+  saveState(id, s);
+  log(id, '系统', '角色决定方式切换为 ' + (s.roleMode === 'program' ? '由程序决定' : '由说书人决定'), true);
+  return { ok:true, roleMode:s.roleMode };
 }
 
 /* 切换本局所有 AI 的说话风格（含说书人） */
@@ -370,4 +481,5 @@ function storyLog(id){
 }
 module.exports = { createGame, createAndStart, setSeatModel, loadState, saveState, log, readAck, allAcked, start, setPhase, infoRevealable,
   assignRole, giveInfo, speak, think, say, messages, nominate, vote, execute, kill, toggleMarker, listGames,
-  agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle };
+  agentLog, gameDir, checkWin, endGame, roleFaction, openVote, castVote, resolveVote, storyLog, setStyle,
+  dealRoles, scriptData, compositionFor, setRoleMode, adminSay };

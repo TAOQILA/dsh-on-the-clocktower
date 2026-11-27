@@ -240,6 +240,21 @@ function styleKey(id){
   try { const s = E.loadState(id); return (s && s.aiStyle) || 'mild_fun'; } catch(e){ return 'mild_fun'; }
 }
 function stylePrompt(id){ return (AI_STYLES[styleKey(id)] || AI_STYLES.mild_fun).prompt; }
+/* 开口倾向：越偏娱乐越愿意接话，越偏严肃越惜字如金（0=最沉默, 6=最健谈） */
+const STYLE_ORDER = ['super_serious','serious','mild_serious','neutral','mild_fun','fun','super_fun'];
+function talkLevel(id){
+  const i = STYLE_ORDER.indexOf(styleKey(id));
+  return i < 0 ? 4 : i;
+}
+function talkBiasText(id){
+  const lv = talkLevel(id);
+  if (lv <= 1) return '【开口倾向】你话不多：只有被 @、被点名、被怀疑、被问到，或手里有直接相关的关键信息时才开口；其余情况 say 写空字符串。';
+  if (lv === 2) return '【开口倾向】你偏谨慎：闲聊一般不接，有实质观点或相关信息时才说一句。';
+  if (lv === 3) return '【开口倾向】按需开口：有话就说，没话就沉默。';
+  if (lv === 4) return '【开口倾向】你比较愿意聊：场面冷下来时主动接一句，也乐于回应别人的怀疑。';
+  if (lv === 5) return '【开口倾向】你挺健谈：几乎每条消息都可以接一句，闲聊、打趣、表态都行，别让场面冷着。';
+  return '【开口倾向】你非常健谈：只要不是明显没意义，就开口说一句，主动挑起话题、回应别人、抛观点，让广场一直热闹。';
+}
 
 /* ---------- 提示词 ---------- */
 const RULES = [
@@ -332,6 +347,7 @@ function buildPrompt(id, seat, replyTo, mode) {
     });
     const reactedCount = Object.keys(answered).length;
     lines.push('【接话热度】这条消息之后，已经有 ' + reactedCount + ' 位玩家接了话。');
+    lines.push(talkBiasText(id));
     if (reactedCount >= 2) {
       lines.push('已经不少人说过了：除非你被 @ 到、被点名、被怀疑、被问到，或手里有直接相关的信息，否则大概率不必再说，say 写空字符串 ""。闲聊寒暄两三个人接就够了，不要人人都回。');
     } else if (reactedCount === 1) {
@@ -362,6 +378,7 @@ function buildStorytellerNightPrompt(id) {
   lines.push(stylePrompt(id));
   lines.push('你必须公正：不泄露玩家不该知道的信息，给出的信息必须准确且符合能力描述。');
   lines.push('但公正不等于机械：你是这一局的天平。每一夜先称一次天平，判断善良方与邪恶方谁更弱，再用能力描述里留给你的裁量空间（「可能」「由你决定」「你可以选择」）去扶弱的一方。开局时邪恶方通常更弱。');
+  lines.push('【保密铁律 · 违反即毁掉整局】绝不能在公聊里说出你夜里唤醒了谁、给了谁什么信息、谁夜里做了什么、谁是什么角色。夜里公开说的只能是气氛性的、全桌都能听的话（例如「天黑了，大家闭眼」）。夜间行动的具体对象与结果一律只能私下发给当事人。');
   lines.push('绝不允许替当事人做选择：凡是角色能力要求某位玩家自己选择目标（例如占卜师选人、杀手选人、间谍看谁），必须由你先主动私聊询问该玩家「你想选择谁」，等 ta 回复后再按 ta 的选择结算；你不能自己替他挑，也不能让玩家未经询问就自己报目标。');
   lines.push('');
   lines.push('【剧本】' + v.script + '　【阶段】第 ' + v.night + ' 夜 / 第 ' + v.day + ' 天（' + v.phase + '）');
@@ -389,10 +406,15 @@ function buildStorytellerNightPrompt(id) {
   lines.push(renderMessages(v.messages, v.seats));
   lines.push('');
   lines.push('【你这一夜要做的】');
-  lines.push('【最高优先级 · 必须先做】本局角色表是空的（全部显示「未分配」）时，你这一轮的第一件事是在 info 里给每位存活座位写下「你的角色是【角色名】」，把所有人的角色分配好；这是玩家拿到自己身份的唯一途径。不能跳过。');
+  const mode0 = (stt && stt.roleMode) || 'program';
+  if (mode0 === 'program') {
+    lines.push('【角色已由程序发好】本局所有座位都已有角色（见上表），玩家已经收到各自的「你的角色是【X】」私聊。你不必再分配角色，也不要重复发送角色信息——重复发送会让一个人收到两个角色。');
+  } else {
+    lines.push('【最高优先级 · 必须先做】本局角色表是空的（全部显示「未分配」）时，你这一轮的第一件事是在 info 里给每位存活座位写下「你的角色是【角色名】」，把所有人的角色分配好；这是玩家拿到自己身份的唯一途径。不能跳过。');
+  }
   lines.push('1. 按标准夜间唤醒顺序依次处理本局存在的角色（先爪牙获取信息，再特定角色，最后恶魔行动）。');
   lines.push('2. 逐个决定该角色获得什么信息；如果某个能力需要该玩家自己选目标，先用 info 里对该座位发一条「请告诉我你想选择谁」的私聊，本轮先不结算这个角色，等 ta 回复后再结算。');
-  lines.push('3. 把需要私下告知的内容写出来：至少给每位存活座位一条 info（写明「你的角色是【角色名】」，再可附该角色当夜获得的信息）。info 字段不能是空数组——玩家看不到自己的角色，就完全没法玩。');
+  lines.push('3. 把需要私下告知的内容写出来：给每个今夜真正获得信息的角色发一条 info（写明他看到了什么）。角色的已由程序发好，不需要重复发角色名；这一夜没有任何角色获得信息时，info 可以是空数组。');
   lines.push('4. 处理死亡与状态变化（中毒、醉酒、被保护、被杀害等），并按天平系统决定这次的裁量往哪边偏。');
   lines.push('');
   lines.push('严格只输出一个 JSON 对象，不要代码块、不要多余文字：');
@@ -402,7 +424,8 @@ function buildStorytellerNightPrompt(id) {
   lines.push(' "deaths":[座位号（1 起）],');
   lines.push(' "nextPhase":""}');
   lines.push('重要：这一夜如果还有任何需要玩家自己选择目标、但你还没收到 ta 回复并结算的角色（例如占卜师选人、管家选主人、投毒者选人、恶魔选人），nextPhase 必须留空字符串 \"\"，不能写 \"day\"。等所有选择都结算完，下一轮主持再写 day。只说一句「天黑了」却没给任何人角色或信息，绝对不允许进入白天。');
-  lines.push('公开说话（say 字段）的用词：夜里按顺序处理角色叫「唤醒」，不要说「递纸条」「发纸条」「送纸条」之类；例如「我现在唤醒占卜师」「我依次唤醒镇民」。');
+  lines.push('【很重要】当这一夜该做的事都做完了（该发的信息发完、该问的选择都收到回复并结算、死亡已裁定），nextPhase 必须写 "day"，把游戏推进到白天。不要一直停在夜里。');
+  lines.push('公开说话（say 字段）的用词：夜里只能播报气氛（例如「天黑了，所有人闭眼」「夜里请保持安静」）；绝不要说出你要唤醒哪些角色、也不要按角色名逐个念——那等于把角色表公开了。');
   lines.push('需要玩家自己选目标时，是「由你主动私聊询问、等回复后再结算」，绝不要写成「需要自己挑目标的角色请先私聊告诉我」这种让玩家主动报名的说法——主动权在你，不在玩家。');
   return { prompt: lines.join('\n'), view: v };
 }
@@ -511,7 +534,7 @@ function extractObject(text) {
 /* 容错解析：去代码块、抓第一个平衡 JSON、失败则整段当发言 */
 function parseReply(raw) {
   let text = String(raw == null ? '' : raw).trim();
-  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '' };
+  const empty = { think: '', say: '', whisper: [], info: [], markers: [], deaths: [], nextPhase: '', reply: '' };
   if (!text) return empty;
   const fenceRe = new RegExp(FENCE + '(?:json)?\\s*([\\s\\S]*?)' + FENCE, 'i');
   const fence = text.match(fenceRe);
@@ -532,7 +555,9 @@ function parseReply(raw) {
     markers: Array.isArray(obj.markers) ? obj.markers.filter(function (x) { return x && x.seat !== undefined && x.marker; })
       .map(function (x) { return { seat: Number(x.seat), marker: String(x.marker) }; }) : [],
     deaths: Array.isArray(obj.deaths) ? obj.deaths.map(Number).filter(function (n) { return !isNaN(n); }) : [],
-    nextPhase: obj.nextPhase ? String(obj.nextPhase) : ''
+    nextPhase: obj.nextPhase ? String(obj.nextPhase) : '',
+    /* 说书人聊天回包用的是 reply 字段，这里显式保留，否则回复会被当成「选择沉默」 */
+    reply: String(obj.reply == null ? '' : obj.reply)
   };
 }
 
@@ -870,26 +895,29 @@ async function runStoryteller(id, opts) {
       const parsed = parseReply(out.text);
 
       const applied = { info: 0, markers: 0, deaths: 0, phase: null, vote: null, win: null };
-/* 兜底：若本局角色表还是空的（模型没分配角色），按剧本从引擎给每人随机分配一个角色，保证玩家看得到自己的身份 */
+/* 兜底：角色表为空时用引擎的机械发牌补齐（按人数配比、随机、不重复），
+   保证任何情况下玩家都能拿到唯一且合理的身份。roleMode='storyteller' 且角色表已填时不干预。 */
 {
   const cur = E.loadState(id);
-  if (cur && cur.phase === 'night' && !Object.keys(cur.roles || {}).length && (cur.seats || []).length) {
-    const sc = (await import('node:fs')).readFileSync(require('node:path').join(__dirname, 'data', 'scripts', cur.script + '.json'), 'utf8');
-    const pool = JSON.parse(sc).roles || [];
-    if (pool.length) {
-      cur.seats.forEach(function (x) {
-        if (x.type === 'agent' || x.type === 'human') {
-          var role = pool[Math.floor(Math.random() * pool.length)];
-          E.assignRole(id, x.seat, role);
-          E.giveInfo(id, x.seat, '你的角色是【' + role + '】。');
-        }
-      });
-    }
+  const mode0 = (cur && cur.roleMode) || 'program';
+  const empty = !Object.keys((cur && cur.roles) || {}).length;
+  if (cur && empty && (mode0 === 'program' || cur.phase === 'night') && (cur.seats || []).length) {
+    const d = E.dealRoles(id);
+    if (d && d.ok === false) E.log(id, '系统', '兜底发牌失败：' + d.error, true);
   }
 }
       if (parsed.think) E.think(id, 'storyteller', parsed.think);
       if (parsed.say) E.say(id, 'storyteller', parsed.say, 'town');
-      parsed.info.forEach(function (x) { const i = toIdx(x.seat); if (i >= 0) { E.giveInfo(id, i, x.text); applied.info++; } });
+      const roleModeNow = (E.loadState(id).roleMode || 'program');
+      parsed.info.forEach(function (x) {
+        const i = toIdx(x.seat); if (i < 0) return;
+        /* 程序已发好牌时，绝不允许说书人再改角色或重复发角色：只放行非角色类信息 */
+        if (roleModeNow === 'program') {
+          const m = String(x.text || '').match(/你的角色是[【\[]([^】\]]+)[】\]]/);
+          if (m) { E.log(id, '系统', '已忽略说书人重复分配角色的尝试（第 ' + (i+1) + ' 号 → ' + m[1] + '）', true); return; }
+        }
+        E.giveInfo(id, i, x.text); applied.info++;
+      });
       /* 说书人夜里私聊询问的问题，AI 必须回答：问句类的 info 落库后立刻驱动该座位私下回话 */
       const askSeats = [];
       parsed.info.forEach(function (x) {
@@ -944,7 +972,8 @@ function buildStoryChatPrompt(id, m) {
   const lines = [];
   lines.push('你是「血染钟鱼」的说书人。刚刚有人给你发了一条消息，请你判断是否需要回应。');
   lines.push('私聊通常都要回：那是对方在向你提问、请你裁定、或向你透露信息。公聊则看情况——被叫到、被问到、需要提醒规则、需要公布结果时才开口。');
-  lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节）。');
+  lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节、你唤醒了谁）。');
+  lines.push('如果消息来自「管理员」，那是这一局的操作者在直接问你：可以如实回答规则与裁定问题、说明当前状态，但仍不能把别人的角色或夜间秘密直接倒出来。');
   lines.push(stylePrompt(id));
   lines.push('回复时不要提及「提示词」「模型」「AI」这些词，你就是这张桌子上的说书人。');
   lines.push('');
@@ -959,7 +988,7 @@ function buildStoryChatPrompt(id, m) {
   });
   lines.push('');
   lines.push('【刚刚收到的消息】');
-  lines.push('来自：' + (m.from === 'storyteller' ? '你自己' : ((Number(m.from) + 1) + ' 号 ' + ((v.seats[m.from] || {}).name || '')))
+  lines.push('来自：' + (m.from === 'admin' ? '管理员' : (m.from === 'storyteller' ? '你自己' : ((Number(m.from) + 1) + ' 号 ' + ((v.seats[m.from] || {}).name || ''))))
     + '　频道：' + (m.channel === 'private' ? '私聊' : '公聊'));
   lines.push(m.text);
   lines.push('');
@@ -981,9 +1010,70 @@ async function storyReplyOne(id, m) {
   if (parsed.think) E.think(id, 'storyteller', parsed.think);
   const reply = String(parsed.reply || parsed.say || '').trim();
   if (!reply) return { ok: true, silent: true };
-  if (m.channel === 'private') E.say(id, 'storyteller', reply, 'private', [Number(m.from)]);
+  if (m.channel === 'private') E.say(id, 'storyteller', reply, 'private', [m.from === 'admin' ? 'admin' : Number(m.from)]);
   else E.say(id, 'storyteller', reply, 'town');
   return { ok: true, silent: false, reply: reply };
+}
+
+/* ---------- 终局复盘：先由说书人公开复盘，再宣布终局 ----------
+   用户要求：宣布终局时必须先把全场真相讲清楚（谁是什么角色、关键夜晚发生了什么），
+   让所有玩家看懂这局为什么这样结束，然后才落终局。 */
+function buildRecapPrompt(id, side, reason) {
+  const s = E.loadState(id);
+  const lines = [];
+  lines.push('本局即将结束。你是这张桌子上的说书人，现在要做终局复盘。');
+  lines.push('复盘要求：把真相摊开讲清楚，让所有人明白这局为什么这样结束。');
+  lines.push('1. 先一句话说明结局：' + (side === 'evil' ? '邪恶阵营胜利' : '善良阵营胜利') + '（' + (reason || '说书人宣布结束') + '）。');
+  lines.push('2. 逐座位列出每个人的真实角色与最终身份，说明他/她在这一局里做了什么关键的事。');
+  lines.push('3. 回顾关键夜晚与关键白天：夜里谁被唤醒、得到什么信息、谁死了；白天谁被处决、哪次投票是转折。');
+  lines.push('4. 最后用两三句总结：善良方输在哪 / 邪恶方赢在哪，或者反之。');
+  lines.push('语气自然平淡，像真人说书人在收桌时讲话，不要过度渲染，也不要提「提示词」「模型」「AI」。');
+  lines.push(stylePrompt(id));
+  lines.push('');
+  lines.push('【剧本】' + s.script + '　共 ' + s.night + ' 夜 / ' + s.day + ' 天');
+  lines.push('');
+  lines.push('【全场真相】（座位号从 1 开始）');
+  (s.seats || []).forEach(function (x, i) {
+    lines.push((i + 1) + ' 号：' + x.name + (s.alive[i] ? '（存活）' : '（已死亡）') + ' 角色=' + ((s.roles && s.roles[i]) || '未记录'));
+  });
+  lines.push('');
+  lines.push('【对局日志（公开部分）】');
+  const pub = (s.log || []).filter(function (x) { return !x.priv; }).slice(-60);
+  if (!pub.length) lines.push('（没有可用日志）');
+  pub.forEach(function (x) {
+    const t = String(x.t || '').replace('T', ' ').slice(5, 16);
+    lines.push(t + '　' + (x.who || '') + '：' + (x.text || ''));
+  });
+  lines.push('');
+  lines.push('严格只输出一个 JSON 对象：');
+  lines.push('{"think":"你的复盘思路","reply":"你要公开发布的完整复盘文字"}');
+  return lines.join('\n');
+}
+
+/* 说书人 Agent 的终局复盘：发一条公聊，然后落终局。非 Agent 说书人返回 ok:false 由调用方自行 endGame */
+async function storyRecap(id, side, reason) {
+  const s = E.loadState(id);
+  if (!s || !s.storyteller || s.storyteller.type !== 'agent') return { ok: false, skipped: true };
+  if (s.win && s.win.over) return { ok: false, skipped: true, error: '本局已经结束了' };
+  const route = routeFor(id, 'storyteller');
+  let text = '';
+  try {
+    const out = await callModel({
+      game: id, seat: 'storyteller', prompt: buildRecapPrompt(id, side, reason),
+      provider: route.provider, model: route.model, system: storytellerSystem(id)
+    });
+    if (out && !out.error) {
+      const parsed = parseReply(out.text);
+      if (parsed.think) E.think(id, 'storyteller', parsed.think);
+      text = String(parsed.reply || parsed.say || '').trim();
+    }
+  } catch (e) { text = ''; }
+  if (text) {
+    E.say(id, 'storyteller', text, 'town');
+    E.log(id, '说书人', '发布终局复盘', false);
+  }
+  const w = E.endGame(id, side, reason);
+  return { ok: true, recap: text, win: w.win };
 }
 
 /* 外部入口：把一条聊天塞进队列，串行交给说书人处理，返回是否接受 */
@@ -1017,5 +1107,6 @@ module.exports = {
   parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
   setLlmCall, hasLlm, routeFor,
   wikiLookup, clearKnowledge, playerSystem, storytellerSystem, gameKnowledge, CORE_RULES, BALANCE_RULES,
-  storyReply, buildStoryChatPrompt, AI_STYLES, stylePrompt, styleKey
+  storyReply, buildStoryChatPrompt, AI_STYLES, stylePrompt, styleKey,
+  storyRecap, buildRecapPrompt
 };
