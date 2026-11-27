@@ -100,8 +100,11 @@ function buildApi(opts){
       const q = adminText[1].trim();
       if (q) {
         try {
-          const ar = E.adminSay(b.id, q);
-          E.say(b.id, b.seat === 'storyteller' ? 'storyteller' : b.seat, '（向说书人下达了管理员指令）', 'town');
+          const ar = E.adminSay(b.id, q, b.seat);
+          /* 公聊里下达的指令只在公聊留一行提示；私聊里下达的就保持私聊，不要把内容捅到公聊 */
+          if (b.channel !== 'private') {
+            E.say(b.id, b.seat === 'storyteller' ? 'storyteller' : b.seat, '（向说书人下达了管理员指令）', 'town');
+          }
           try { if (ar && ar.message) A.storyReply(b.id, ar.message); } catch (e) {}
           return { ok: true, admin: true, message: ar && ar.message };
         } catch (e) {}

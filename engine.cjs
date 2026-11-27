@@ -430,10 +430,13 @@ function say(id, seat, text, channel, to){
   return {ok:true, message:msg};
 }
 /* 管理员私聊说书人：以 from='admin' 的身份投递一条私聊，只有说书人能看到 */
-function adminSay(id, text){
+function adminSay(id, text, seat){
   const s = loadState(id);
   if (!Array.isArray(s.messages)) s.messages = [];
-  const msg = { t:new Date().toISOString(), from:'admin', channel:'private', to:['storyteller'], text:String(text||'') };
+  /* adminSeat 记住是哪个座位下达的指令，这样说书人的回答能回到他手里，
+     而其他玩家看不到这条指令，也看不到回答的内容 */
+  const msg = { t:new Date().toISOString(), from:'admin', channel:'private', to:['storyteller'],
+    text:String(text||''), adminSeat:(seat===undefined||seat===null||seat==='storyteller')?null:Number(seat) };
   s.messages.push(msg);
   saveState(id, s);
   log(id, '管理员', '[私聊说书人] ' + msg.text);
@@ -447,7 +450,11 @@ function messages(id, viewer, isStoryteller){
   return s.messages.filter(function(m){
     if (m.channel!=='private') return true;
     /* 管理员私聊说书人：只有说书人视角看得到，玩家/旁观者都看不到 */
-    if (m.from==='admin' || (Array.isArray(m.to) && m.to.indexOf('admin')>=0)) return !!isStoryteller;
+    if (m.from==='admin' || (Array.isArray(m.to) && m.to.indexOf('admin')>=0)) {
+      if (isStoryteller) return true;
+      /* 下达指令的那个座位自己能看到（回答会回到他这里），其他玩家一律看不到 */
+      return m.adminSeat != null && Number(m.adminSeat) === Number(viewer);
+    }
     /* 玩家之间的私聊只有收发双方能看到；说书人只在消息与自己有关时才看得到，
        否则「私聊 5 号」的内容会被说书人当成发给自己的话 */
     const involvesSt = (m.from === 'storyteller') || (Array.isArray(m.to) && m.to.indexOf('storyteller') >= 0);

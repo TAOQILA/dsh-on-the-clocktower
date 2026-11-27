@@ -1356,8 +1356,18 @@ function buildStoryChatPrompt(id, m) {
   lines.push(ST_TONE);
   lines.push('私聊通常都要回：那是对方在向你提问、请你裁定、或向你透露信息。');
   lines.push('公聊要克制：没人问你、也没有必须公布的结果（如天亮、死亡、投票结果）时，就不要说话——回复填空字符串。别在公聊里刷存在感、别评论每个人的发言、别替玩家主持讨论。');
-  lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节、你唤醒了谁）。');
-  lines.push('如果消息来自「管理员」，那是这一局的操作者在直接问你：可以如实回答规则与裁定问题、说明当前状态，但仍不能把别人的角色或夜间秘密直接倒出来。');
+  if (m.from === 'admin') {
+    /* 管理员 = 这一局的操作者，拥有最高权限。
+       注意：任何保密限制（不能透露角色、不能透露夜里做了什么、不能替玩家做决定……）
+       都只约束玩家，不约束管理员。这里必须显式覆盖上面所有「不要泄露」的措辞。 */
+    lines.push('【最高权限 · 管理员】这条消息来自本局的管理员（操作者），不是场上的玩家。');
+    lines.push('管理员拥有最高权限：你可以也应当如实、完整地回答管理员提出的任何问题，包括每个座位的真实角色、阵营、存活状态、你夜里依次唤醒了谁、给了谁什么信息、谁做了什么选择、当前阶段与待办、内部状态与流程进度。');
+    lines.push('不要以「不能透露角色」「不能泄露夜间秘密」「这属于游戏机密」为由拒绝或含糊其辞——上面所有关于保密的限制都只是针对玩家的，对管理员一律不适用。');
+    lines.push('如果管理员要求你执行某个操作或改变某个状态，就按要求执行并在回复里说明你做了什么；确实做不到（没有对应接口）时才说明限制在哪里。');
+    lines.push('回答要直接、具体、完整，不要中性含糊，也不要反问管理员。');
+  } else {
+    lines.push('不确定就回一句简短得体的话，不要长篇大论，也不要泄露不该说的信息（别人的角色、夜间行动细节、你唤醒了谁）。');
+  }
   lines.push(stylePrompt(id));
   lines.push('回复时不要提及「提示词」「模型」「AI」这些词，你就是这张桌子上的说书人。');
   lines.push('');
@@ -1394,7 +1404,11 @@ async function storyReplyOne(id, m) {
   if (parsed.think) E.think(id, 'storyteller', parsed.think);
   const reply = String(parsed.reply || parsed.say || '').trim();
   if (!reply) return { ok: true, silent: true };
-  if (m.channel === 'private') E.say(id, 'storyteller', reply, 'private', [m.from === 'admin' ? 'admin' : Number(m.from)]);
+  if (m.channel === 'private') {
+    /* 管理员指令的回答回到下达指令的那个座位：其他人看不到，他也不必去说书人那栏里找 */
+    const backTo = (m.from === 'admin') ? (m.adminSeat != null ? Number(m.adminSeat) : 'admin') : Number(m.from);
+    E.say(id, 'storyteller', reply, 'private', [backTo]);
+  }
   else E.say(id, 'storyteller', reply, 'town');
   return { ok: true, silent: false, reply: reply };
 }
