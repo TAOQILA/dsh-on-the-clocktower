@@ -1047,6 +1047,8 @@ function voteWeight(s, seat){
   if (/每次投票时可以投两票/.test(ab)) return 2;
   if (/投票会被算作负数/.test(ab)) return -1;
   const ms = (s.markers && s.markers[seat]) || [];
+  const mw = ms.map(function(x){ const mm = /票权\s*[:：]\s*(-?\d+)/.exec(String(x)); return mm ? Number(mm[1]) : null; }).filter(function(v){ return v !== null; })[0];
+  if (mw !== undefined && mw !== null) return mw;
   if (ms.some(function(x){ return /讷帽/.test(String(x)); })) return 2;
   return 1;
 }
@@ -1131,9 +1133,15 @@ function nomPropose(id, from, target, reason){
   s.nom.usedNom[from] = true; s.nom.usedTarget[target] = true;
   s.nom.asked[from] = true;
   s.nom.queue.push({ from:from, target:target, reason:String(reason||''), t:new Date().toISOString() });
+  s.nominations.push({ kind:'nominate', from:from, target:target, day:Number(s.day||0), t:new Date().toISOString() });
   saveState(id, s);
   say(id, 'storyteller', s.seats[from].name + ' 提名了 ' + s.seats[target].name + '。', 'town');
   log(id, '说书人', (from+1)+' 号 '+s.seats[from].name+' 提名 '+(target+1)+' 号 '+s.seats[target].name);
+  /* 女巫的诅咒：被他诅咒的玩家一旦发起提名就死亡 */
+  const _curse = ((s.markers && s.markers[from]) || []).filter(function(x){ return /^女巫诅咒/.test(String(x)); })[0];
+  if (_curse) {
+    try { kill(id, from, '被女巫诅咒'); } catch (e) {}
+  }
   return { ok:true, queue:s.nom.queue.length };
 }
 function nomNext(id){
@@ -1251,6 +1259,7 @@ function nomResolve(id){
   }
   const secret = secretBallot(s);
   cur.votes = votes; cur.passed = passed; cur.aliveCount = aliveCount; cur.secret = secret; cur.invalid = invalid;
+  s.nominations.push({ kind:'votes', from:cur.from, target:cur.target, day:Number(s.day||0), yes:cur.yes.slice(), votes:votes, secret:!!secret, t:new Date().toISOString() });
   s.nom.stage = 'result';
   s.nom.results.push({ from:cur.from, target:cur.target, votes:votes, aliveCount:aliveCount, passed:passed, secret:secret });
   saveState(id, s);
@@ -2035,6 +2044,289 @@ const NIGHT_CHOOSE = {
       return { text:"你得知 "+nSeatLabel(s,t)+" 的角色是【"+nRoleAt(s,t)+"】。" };
     } }
 };
+/* ===== 夜间机械层 · 第二批：信息类角色（全部可由程序算出） ===== */
+function nRoleNamed(text){
+  const all = (function(){ try { return roleInfoAll() || []; } catch (e) { return []; } })();
+  const t = String(text || "");
+  let hit = "";
+  all.forEach(function(r){ const nm = String((r && r.name) || ""); if (nm && nm.length > hit.length && t.indexOf(nm) >= 0) hit = nm; });
+  return hit;
+}
+function nCircDist(n, a, b){
+  const d = Math.abs(a - b);
+  return Math.min(d, n - d);
+}
+Object.assign(NIGHT_FIXED, {
+  "祖母": function(s, seat){
+    const good = [];
+    (s.seats || []).forEach(function(x, i){ if (s.alive[i] && i !== seat && !isEvilSeat(s, i)) good.push(i); });
+    if (!good.length) return { text: "你今晚没有获得任何信息（场上没有其他善良玩家）。" };
+    const t = nPick(good);
+    return { text: "你得知 " + nSeatLabel(s, t) + " 是善良玩家，他的角色是【" + nRoleAt(s, t) + "】。" };
+  },
+  "神谕者": function(s){
+    let n = 0;
+    (s.seats || []).forEach(function(x, i){ if (!s.alive[i] && isEvilSeat(s, i)) n++; });
+    return { text: "你得知：已经死亡的玩家中，有 " + n + " 名是邪恶阵营。" };
+  },
+  "数学家": function(s){
+    let n = 0;
+    (s.seats || []).forEach(function(x, i){ if (s.alive[i] && nIsBlocked(s, i)) n++; });
+    return { text: "你得知：有 " + n + " 名玩家的能力因为其他角色的能力而没有正常生效。" };
+  },
+  "教父": function(s){
+    const outs = [];
+    (s.seats || []).forEach(function(x, i){ if (nFacAt(s, i) === "outsider") outs.push(nRoleAt(s, i)); });
+    const uniq = outs.filter(function(v, i){ return outs.indexOf(v) === i; });
+    return { text: uniq.length ? ("你得知在场的外来者角色有：" + uniq.join("、") + "。") : "你得知：场上没有外来者角色。" };
+  },
+  "钟表匠": function(s){
+    const demons = [], minions = [];
+    (s.seats || []).forEach(function(x, i){
+      const fac = nFacAt(s, i);
+      if (fac === "demon") demons.push(i);
+      if (fac === "minion") minions.push(i);
+    });
+    if (!demons.length || !minions.length) return { text: "你得知：距离无法计算（场上没有恶魔或没有爪牙）。" };
+    let best = 99;
+    demons.forEach(function(d){ minions.forEach(function(m){ const v = nCircDist(s.seats.length, d, m); if (v < best) best = v; }); });
+    return { text: "你得知：恶魔与爪牙之间的最近距离是 " + best + "。" };
+  },
+  "城镇公告员": function(s){
+    const day = Number(s.day || 0);
+    const hit = (s.nominations || []).some(function(x){ return x && x.kind === "nominate" && Number(x.day) === day && nFacAt(s, x.from) === "minion"; });
+    return { text: "你得知：今天白天" + (hit ? "有" : "没有") + "爪牙发起过提名。" };
+  },
+  "卖花女孩": function(s){
+    const day = Number(s.day || 0);
+    const hit = (s.nominations || []).some(function(x){
+      if (!x || x.kind !== "votes" || Number(x.day) !== day) return false;
+      return (x.yes || []).some(function(k){ return nFacAt(s, k) === "demon"; });
+    });
+    return { text: "你得知：今天白天" + (hit ? "有" : "没有") + "恶魔投过票。" };
+  },
+  "贤者": function(s, seat){
+    const demons = [];
+    (s.seats || []).forEach(function(x, i){ if (nFacAt(s, i) === "demon") demons.push(i); });
+    if (!demons.length) return { text: "你今晚没有获得任何信息。" };
+    const d = demons[0];
+    const others = [];
+    (s.seats || []).forEach(function(x, i){ if (i !== d) others.push(i); });
+    const o = others.length ? nPick(others) : d;
+    return { text: "你得知两名玩家：" + nSeatLabel(s, d) + " 与 " + nSeatLabel(s, o) + "。杀死你的那个恶魔就在其中。" };
+  }
+});
+/* ===== 夜间机械层 · 第二批：需要玩家做选择的角色 ===== */
+Object.assign(NIGHT_CHOOSE, {
+  "女巫": { prompt: "女巫，请选择一名玩家：如果他明天白天发起提名，他会死亡（回复座位号，不能选自己）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      if (t === seat) return { error: "不能选择自己，请重新选一名玩家" };
+      setMarker(id, t, "女巫诅咒:" + (seat + 1), "day");
+      return { text: "你对 " + nSeatLabel(s, t) + " 下了诅咒：如果他明天白天发起提名，他会死亡。" };
+    } },
+  "刺客": { prompt: "刺客，你可以选择一名玩家：他立刻死亡，即使有任何免死效果（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      markUsed(id, seat, "刺客");
+      const r = kill(id, t, "被刺客刺杀", { force: true });
+      if (r && r.ok === false) return { error: String(r.error || "刺杀失败，请重新选择") };
+      return { text: "你刺杀了 " + nSeatLabel(s, t) + "。" };
+    } },
+  "驱魔人": { prompt: "驱魔人，请选择一名玩家（不能与上个夜晚相同）：如果你选中了恶魔，他今晚不会因自身能力被唤醒（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      const prev = ((s.extra || {}).exorcistPrev || {})[seat];
+      if (prev !== undefined && Number(prev) === t) return { error: "不能选择与上个夜晚相同的人，请重新选" };
+      setMarker(id, t, "被驱魔", "night");
+      if (nFacAt(s, t) === "demon") {
+        giveInfo(id, t, "你得知：今晚有一位驱魔人选中了你，你今晚不会因自身能力被唤醒。");
+        return { text: "你选中了 " + nSeatLabel(s, t) + "，他是恶魔——今晚他的能力不会发动。" };
+      }
+      return { text: "你选中了 " + nSeatLabel(s, t) + "，今晚他没有被影响。" };
+    } },
+  "魔鬼代言人": { prompt: "魔鬼代言人，请选择一名存活玩家（不能与上个夜晚相同）：如果明天白天他被处决，他不会死亡（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      const prev = ((s.extra || {}).devilPrev || {})[seat];
+      if (prev !== undefined && Number(prev) === t) return { error: "不能选择与上个夜晚相同的人，请重新选" };
+      setShield(id, t, "魔鬼代言人");
+      return { text: "你让 " + nSeatLabel(s, t) + " 明天被处决时不会死亡。" };
+    } },
+  "舞蛇人": { prompt: "舞蛇人，请选择一名存活玩家：如果你选中了恶魔，你和他交换角色与阵营（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      if (nFacAt(s, t) !== "demon") return { text: "你选中了 " + nSeatLabel(s, t) + "，他不是恶魔，什么都没发生。" };
+      const myRole = nRoleAt(s, seat);
+      const tRole = nRoleAt(s, t);
+      forceRole(id, seat, tRole, { silent: true });
+      forceRole(id, t, myRole, { silent: true });
+      setAlignment(id, seat, "evil");
+      setAlignment(id, t, "good");
+      setMarker(id, t, "中毒", "day");
+      giveInfo(id, seat, "你和 " + nSeatLabel(s, t) + " 交换了角色与阵营：你现在是【" + tRole + "】，阵营邪恶。");
+      giveInfo(id, t, "你和舞蛇人交换了角色与阵营：你现在是【" + myRole + "】，阵营善良，并且中毒。");
+      return { text: "你选中了恶魔 " + nSeatLabel(s, t) + "，你们交换了角色与阵营，他中毒了。" };
+    } },
+  "水手": { prompt: "水手，请选择一名存活玩家：你们之一会醉酒直到下个黄昏（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      const who = Math.random() < 0.5 ? seat : t;
+      setMarker(id, who, "醉酒", "day");
+      return { text: "你选择了 " + nSeatLabel(s, t) + "。" + (who === seat ? "你" : nSeatLabel(s, t)) + "会醉酒直到下个黄昏。" };
+    } },
+  "旅店老板": { prompt: "旅店老板，请选择两名玩家：他们今晚不会死亡，但其中一人会醉酒到下个黄昏（回复两个座位号）。",
+    resolve: function(id, s, seat, seats){
+      if (seats.length < 2) return { error: "请选择两名玩家" };
+      const a = seats[0], b = seats[1];
+      setShield(id, a, "旅店老板");
+      setShield(id, b, "旅店老板");
+      const who = Math.random() < 0.5 ? a : b;
+      setMarker(id, who, "醉酒", "day");
+      return { text: "你让 " + nSeatLabel(s, a) + " 与 " + nSeatLabel(s, b) + " 今晚不会死亡；其中 " + nSeatLabel(s, who) + " 会醉酒到下个黄昏。" };
+    } },
+  "赌徒": { prompt: "赌徒，请选择一名玩家并说出你猜他的角色（例如「3 号 占卜师」）。猜错你会死亡。",
+    resolve: function(id, s, seat, seats, text){
+      const t = seats[0];
+      const guess = nRoleNamed(text);
+      if (!guess) return { error: "请同时告诉我你猜的角色名，例如「3 号 占卜师」" };
+      const real = nRoleAt(s, t);
+      if (guess === real) return { text: "你猜 " + nSeatLabel(s, t) + " 是【" + guess + "】，猜对了。" };
+      kill(id, seat, "赌徒猜错", { force: true });
+      return { text: "你猜 " + nSeatLabel(s, t) + " 是【" + guess + "】，但他其实是【" + real + "】。你死了。" };
+    } },
+  "教授": { prompt: "教授，你可以选择一名已经死亡的玩家：如果他是镇民，你会让他起死回生（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      markUsed(id, seat, "教授");
+      if (s.alive[t]) return { text: "你选择了 " + nSeatLabel(s, t) + "，但他还活着，什么都没发生。" };
+      if (nFacAt(s, t) !== "townsfolk") return { text: "你选择了 " + nSeatLabel(s, t) + "，但他不是镇民，没有被复活。" };
+      revive(id, t, { reason: "教授的能力" });
+      return { text: "你让 " + nSeatLabel(s, t) + " 起死回生。" };
+    } },
+  "沙巴洛斯": { prompt: "沙巴洛斯，请选择两名玩家：他们都会死亡（回复两个座位号）。",
+    resolve: function(id, s, seat, seats){
+      if (seats.length < 2) return { error: "请选择两名玩家" };
+      const a = seats[0], b = seats[1];
+      kill(id, a, "被沙巴洛斯杀害");
+      kill(id, b, "被沙巴洛斯杀害");
+      return { text: "你选择了 " + nSeatLabel(s, a) + " 与 " + nSeatLabel(s, b) + "，他们在夜里死亡。" };
+    } },
+  "珀": { prompt: "珀，你可以选择一名玩家杀害；也可以回复「不选」放弃今晚的行动（回复座位号）。", optional: true,
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      kill(id, t, "被珀杀害");
+      return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" };
+    } },
+  "涡流": { prompt: "涡流，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; kill(id, t, "被涡流杀害"); return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" }; } },
+  "诺-达鲺": { prompt: "诺-达鲺，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; kill(id, t, "被诺-达鲺杀害"); return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" }; } },
+  "方古": { prompt: "方古，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; kill(id, t, "被方古杀害"); return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" }; } },
+  "亡骨魔": { prompt: "亡骨魔，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; kill(id, t, "被亡骨魔杀害"); return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" }; } },
+  "普卡": { prompt: "普卡，请选择一名玩家毒害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; setMarker(id, t, "中毒", "day"); return { text: "你毒害了 " + nSeatLabel(s, t) + "。" }; } },
+  "僵怖": { prompt: "僵怖，请选择一名玩家杀害（回复座位号）。",
+    resolve: function(id, s, seat, seats){ const t = seats[0]; kill(id, t, "被僵怖杀害"); return { text: "你选择了 " + nSeatLabel(s, t) + "，他在夜里死亡。" }; } },
+  "麻脸巫婆": { prompt: "麻脸巫婆，请选择一名玩家和一个角色名（例如「3 号 贤者」）：如果该角色不在场，他会变成该角色。",
+    resolve: function(id, s, seat, seats, text){
+      const t = seats[0];
+      const role = nRoleNamed(text);
+      if (!role) return { error: "请同时告诉我要把他变成哪个角色，例如「3 号 贤者」" };
+      const present = Object.keys(s.roles || {}).some(function(k){ return String(s.roles[k]) === role; });
+      if (present) return { text: "【" + role + "】已经在场，什么都没发生。" };
+      forceRole(id, t, role, { silent: false });
+      return { text: "你把 " + nSeatLabel(s, t) + " 变成了【" + role + "】。" };
+    } },
+  "侍臣": { prompt: "侍臣，你可以选择一个角色：如果该角色在场，其中一个会醉酒三天三夜（回复角色名）。",
+    resolve: function(id, s, seat, seats, text){
+      const role = nRoleNamed(text);
+      if (!role) return { error: "请告诉我你要指定的角色名" };
+      markUsed(id, seat, "侍臣");
+      const hits = [];
+      (s.seats || []).forEach(function(x, i){ if (s.alive[i] && nRoleAt(s, i) === role) hits.push(i); });
+      if (!hits.length) return { text: "【" + role + "】不在场，什么都没发生。" };
+      const t = hits[0];
+      setMarker(id, t, "醉酒", "day");
+      return { text: "你让 " + nSeatLabel(s, t) + "（" + role + "）从今晚开始醉酒三天三夜。" };
+    } },
+  "哲学家": { prompt: "哲学家，你可以选择一个善良角色：你会获得他的能力（回复角色名）。",
+    resolve: function(id, s, seat, seats, text){
+      const role = nRoleNamed(text);
+      if (!role) return { error: "请告诉我你要获得哪个角色的能力" };
+      const fac = String((roleInfoByName(role) || {}).faction || "");
+      if (fac !== "townsfolk" && fac !== "outsider") return { error: "只能选择善良角色（镇民或外来者）" };
+      markUsed(id, seat, "哲学家");
+      grantAbility(id, seat, role);
+      return { text: "你获得了【" + role + "】的能力。" };
+    } },
+  "官员": { prompt: "官员，请选择一名除你以外的玩家：明天白天他的投票算作三票（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      if (t === seat) return { error: "不能选择自己，请重新选一名玩家" };
+      setMarker(id, t, "票权:3", "day");
+      return { text: "你让 " + nSeatLabel(s, t) + " 明天白天的投票算作三票。" };
+    } },
+  "窃贼": { prompt: "窃贼，请选择一名除你以外的玩家：明天白天他的投票会被算作负数（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      if (t === seat) return { error: "不能选择自己，请重新选一名玩家" };
+      setMarker(id, t, "票权:-1", "day");
+      return { text: "你让 " + nSeatLabel(s, t) + " 明天白天的投票会被算作负数。" };
+    } },
+  "侍女": { prompt: "侍女，请选择除你以外的两名存活玩家：你会得知他们中有几人在当晚因自身能力而被唤醒（回复两个座位号）。",
+    resolve: function(id, s, seat, seats){
+      if (seats.length < 2) return { error: "请选择两名玩家" };
+      let n = 0;
+      seats.slice(0, 2).forEach(function(k){ const kd = NIGHT_KIND[nRoleAt(s, k)] || "st"; if (kd === "info" || kd === "choice") n++; });
+      return { text: "你选择了 " + nSeatLabel(s, seats[0]) + " 与 " + nSeatLabel(s, seats[1]) + "：他们中有 " + n + " 人在当晚因自身能力而被唤醒。" };
+    } },
+  "筑梦师": { prompt: "筑梦师，请选择一名玩家（不能是自己或旅行者）：你会得知一个善良角色和一个邪恶角色，他是其中之一（回复座位号）。",
+    resolve: function(id, s, seat, seats){
+      const t = seats[0];
+      const sc = (function(){ try { return scriptData(s.script) || {}; } catch (e) { return {}; } })();
+      const groups = (sc.groups || {});
+      const goodPool = (groups["镇民"] || []).concat(groups["外来者"] || []);
+      const evilPool = (groups["爪牙"] || []).concat(groups["恶魔"] || []);
+      const g = goodPool.length ? nPick(goodPool) : "洗衣妇";
+      const e = evilPool.length ? nPick(evilPool) : "投毒者";
+      return { text: "你得知两个角色：【" + g + "】与【" + e + "】。" + nSeatLabel(s, t) + " 是其中之一。" };
+    } },
+  "女裁缝": { prompt: "女裁缝，你可以选择除你以外的两名玩家：你会得知他们是否为同一阵营（回复两个座位号）。",
+    resolve: function(id, s, seat, seats){
+      if (seats.length < 2) return { error: "请选择两名玩家" };
+      markUsed(id, seat, "女裁缝");
+      const same = (alignOf(s, seats[0]) === alignOf(s, seats[1]));
+      return { text: "你得知 " + nSeatLabel(s, seats[0]) + " 与 " + nSeatLabel(s, seats[1]) + (same ? " 是同一阵营。" : " 不是同一阵营。") };
+    } }
+});
+/* 某些角色在本夜不该发动（一次性已用、条件不满足），直接跳过 */
+let NIGHT_CUR_ID = "";
+const NIGHT_SKIP = {
+  "祖母": function(s){ return Number(s.night || 1) > 1 ? "只在首个夜晚发动" : ""; },
+  "教父": function(s){ return Number(s.night || 1) > 1 ? "只在首个夜晚发动" : ""; },
+  "钟表匠": function(s){ return Number(s.night || 1) > 1 ? "只在首个夜晚发动" : ""; },
+  "贤者": function(s, seat){ return s.alive[seat] ? "没有因为恶魔而死，能力不触发" : ""; },
+  "刺客": function(s, seat){ return isUsed(NIGHT_CUR_ID, seat, "刺客") ? "本局已经用过" : ""; },
+  "教授": function(s, seat){ return isUsed(NIGHT_CUR_ID, seat, "教授") ? "本局已经用过" : ""; },
+  "哲学家": function(s, seat){ return isUsed(NIGHT_CUR_ID, seat, "哲学家") ? "本局已经用过" : ""; },
+  "侍臣": function(s, seat){ return isUsed(NIGHT_CUR_ID, seat, "侍臣") ? "本局已经用过" : ""; },
+  "女裁缝": function(s, seat){ return isUsed(NIGHT_CUR_ID, seat, "女裁缝") ? "本局已经用过" : ""; },
+  "女巫": function(s){ return (nAlive(s).length <= 3) ? "存活玩家只剩三名，能力失效" : ""; },
+  "僵怖": function(s){ return (Number((s.extra || {}).dayDeathDay) === Number(s.day)) ? "今天白天已经有人死亡，能力不触发" : ""; }
+};
+Object.assign(NIGHT_KIND, {
+  "祖母": "info", "神谕者": "info", "数学家": "info", "教父": "info",
+  "钟表匠": "info", "城镇公告员": "info", "卖花女孩": "info", "贤者": "info",
+  "女巫": "choice", "刺客": "choice", "驱魔人": "choice", "魔鬼代言人": "choice",
+  "舞蛇人": "choice", "水手": "choice", "旅店老板": "choice", "赌徒": "choice",
+  "教授": "choice", "沙巴洛斯": "choice", "珀": "choice", "涡流": "choice",
+  "诺-达鲺": "choice", "方古": "choice", "亡骨魔": "choice", "普卡": "choice",
+  "僵怖": "choice", "麻脸巫婆": "choice", "侍臣": "choice", "哲学家": "choice",
+  "官员": "choice", "窃贼": "choice", "侍女": "choice", "筑梦师": "choice", "女裁缝": "choice"
+});
 /* 按标准顺序生成当夜清单 */
 function nightBuildRun(s){
   const d=nightOrderData();
@@ -2065,6 +2357,7 @@ function nightBuildRun(s){
 }
 function nightEnsure(id){
   const s=loadState(id);
+  s.__id=id;
   const n=Number(s.night||1);
   if(!s.nightRun || Number(s.nightRun.night)!==n || !Array.isArray(s.nightRun.steps) || !s.nightRun.steps.length){
     s.nightRun=nightBuildRun(s);
@@ -2081,6 +2374,7 @@ function nightPending(s){
 }
 /* 推进一步：返回 {ok,kind}，kind 为 info / ask / skip / st / done */
 function nightExec(id){
+  NIGHT_CUR_ID = id;
   const s=nightEnsure(id);
   const run=s.nightRun;
   /* 守鸦人：本夜死亡才触发，动态补一步 */
@@ -2102,21 +2396,36 @@ function nightExec(id){
   }
   const kind=NIGHT_KIND[step.role]||"st";
   step.mode=kind;
+  const _sk = NIGHT_SKIP[step.role];
+  if (_sk) {
+    let why = "";
+    try { why = _sk(s, step.seat) || ""; } catch (e) { why = ""; }
+    if (why) { step.status = "skipped"; step.note = why; saveState(id, s); return { ok:true, kind:"skip", step:step }; }
+  }
+  if (roleFaction(step.role) === "demon") {
+    const _ms = (s.markers && s.markers[step.seat]) || [];
+    const _ex = _ms.filter(function(x){ return /被驱魔/.test(String(x)); })[0];
+    if (_ex) { step.status = "skipped"; step.note = "被驱魔人封锁，今晚不会因自身能力被唤醒"; giveInfo(id, step.seat, "你今晚被驱魔人封锁，能力没有发动。"); saveState(id, s); return { ok:true, kind:"skip", step:step }; }
+  }
   if(kind==="passive"){ step.status="skipped"; step.note="无需夜间行动"; saveState(id,s); return { ok:true, kind:"skip", step:step }; }
   if(kind==="info"){
     const fn=NIGHT_FIXED[step.role];
     if(!fn){ step.status="manual"; saveState(id,s); return { ok:true, kind:"st", step:step }; }
     if(nIsBlocked(s,step.seat)){
-      step.status="done"; step.note="（该角色处于中毒/醉酒，能力未正常生效）";
       giveInfo(id, step.seat, "你今晚没有获得任何信息。");
-      saveState(id,s);
+      const _sA = loadState(id);
+      const _stA = (_sA.nightRun.steps || []).filter(function(x){ return x.key === step.key; })[0];
+      if (_stA) { _stA.status = "done"; _stA.note = "（该角色处于中毒/醉酒，能力未正常生效）"; }
+      saveState(id, _sA);
       log(id,"说书人",nSeatLabel(s,step.seat)+" 的【"+step.role+"】能力因中毒/醉酒被屏蔽",true);
       return { ok:true, kind:"info", step:step, text:"（能力被屏蔽）" };
     }
     const r=fn(s, step.seat);
-    step.status="done"; step.note=r.text;
     giveInfo(id, step.seat, r.text);
-    saveState(id,s);
+    const _sB = loadState(id);
+    const _stB = (_sB.nightRun.steps || []).filter(function(x){ return x.key === step.key; })[0];
+    if (_stB) { _stB.status = "done"; _stB.note = r.text; }
+    saveState(id, _sB);
     return { ok:true, kind:"info", step:step, text:r.text };
   }
   if(kind==="choice"){
@@ -2133,14 +2442,22 @@ function nightAnswer(id, seat, text){
   const step=(s.nightRun.steps||[]).filter(function(x){ return x.status==="await" && Number(x.seat)===Number(seat); })[0];
   if(!step) return { ok:false, error:"现在没有在等你的选择" };
   const seats=nightParseSeats(s, text);
-  if(!seats.length) return { ok:false, error:"没看出你要选哪个座位，请回复座位号" };
   const h=NIGHT_CHOOSE[step.role];
   if(!h) return { ok:false, error:"这一步不能由玩家回答" };
-  const r=h.resolve(id, s, Number(seat), seats);
+  if(!seats.length && h.optional && /不选|跳过|放弃|不用|算了/.test(String(text||""))){
+    step.status="done"; step.note="（玩家选择不使用能力）";
+    giveInfo(id, Number(seat), "你今晚选择了不使用能力。");
+    saveState(id,s);
+    return { ok:true, text:"（不使用能力）" };
+  }
+  if(!seats.length) return { ok:false, error:"没看出你要选哪个座位，请回复座位号" };
+  const r=h.resolve(id, s, Number(seat), seats, String(text||""));
   if(r && r.error) return { ok:false, error:r.error };
-  step.status="done"; step.note=r.text;
   giveInfo(id, Number(seat), r.text);
-  saveState(id,s);
+  const _sC = loadState(id);
+  const _stC = (_sC.nightRun.steps || []).filter(function(x){ return x.status === "await" && Number(x.seat) === Number(seat); })[0];
+  if (_stC) { _stC.status = "done"; _stC.note = r.text; }
+  saveState(id, _sC);
   return { ok:true, text:r.text };
 }
 /* 说书人裁定完成一个 manual 步骤 */
