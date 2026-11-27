@@ -296,7 +296,8 @@ function kill(id, seat, reason, opts){
     if (s.nightDeaths.indexOf(seat) < 0) s.nightDeaths.push(seat);
   }
   saveState(id,s);
-  log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+(isNight?' 在夜里死亡':' 死亡')+(reason?('（'+reason+'）'):''));
+  /* 夜里的死亡是天亮才公布的机密：这条日志必须标成私密，否则非说书人视角能翻日志提前知道 */
+  log(id,'系统',(seat+1)+' 号 '+s.seats[seat].name+(isNight?' 在夜里死亡':' 死亡')+(reason?('（'+reason+'）'):''), !!isNight);
   /* 死亡时角色钩子：帽匠等 on_death 角色由说书人在提示词里处理，这里只记录 */
   try { onDeathHooks(id, seat); } catch (e) {}
   const w = checkWin(id);

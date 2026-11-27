@@ -75,6 +75,12 @@ function buildApi(opts){
       s.markers = (s.seats || []).map(function () { return []; });
       /* 日志里分配角色、改模型这类条目会暴露身份，非说书人视角一律过滤 */
       s.log = (s.log || []).filter(function (x) { return !x.priv; });
+      /* 夜里死的人，天亮播报之前谁都不该知道：非说书人视角把「昨夜死亡」的存活状态还原成存活，
+         否则圆桌头像会在半夜就变黑白，等于提前泄露了死亡结果。天亮进入白天后 nightDeaths 已被清空，自然恢复正常。 */
+      if (s.phase === 'night' || s.phase === 'dawn') {
+        (s.nightDeaths || []).forEach(function (i) { if (s.alive && s.alive[i] !== undefined) s.alive[i] = true; });
+      }
+      s.nightDeaths = [];
       /* 角色属于底牌：对局进行中只把「自己那一张」下发，终局后全部公开 */
       if (!(s.win && s.win.over)) {
         const mineSeat = Number(q.seat);
