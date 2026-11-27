@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.11';
+var VERSION = '0.15.12';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -2017,7 +2017,14 @@ async function sendDm(){
   S.dmDraft = ''; if (inp) inp.value = '';
   await loadChat();
   var idxs = to.filter(function(x){ return x !== 'storyteller'; }).map(Number);
-  if (idxs.length) api('round', { id: S.game.id, seats: idxs, replyTo: seat }).catch(function(){});
+  if (idxs.length){
+    /* 私聊必须有人回：被占用就排队（服务端已支持），真失败要把原因显示出来，
+       不能像以前那样 .catch 静默吞掉，否则玩家只看到「他不理我」。 */
+    try {
+      var rr = await api('round', { id: S.game.id, seats: idxs, replyTo: seat });
+      if (rr && rr.ok === false) S.startError = '对方暂时没能回应：' + (rr.error || '未知原因');
+    } catch(e){ S.startError = '对方暂时没能回应：' + String((e && e.message) || e); }
+  }
   refresh();
 }
 /* 离开当前对局（不删文件） */

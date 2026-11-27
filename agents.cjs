@@ -30,6 +30,8 @@ const MAX_MSGS_IN_PROMPT = 20;   /* 只带最近 20 条：历史越长首 token 
 /* 私聊不再限制次数：上限只是防模型一次刷屏的兜底 */
 const MAX_DM_PER_DAY = 99;
 const CALL_TIMEOUT_MS = 90000;
+/* 单个 AI 一次模型调用最多等这么久：超时就算这一位这轮弃权，不能让整轮卡死 */
+const MODEL_TIMEOUT_MS = 45000;
 const FENCE = String.fromCharCode(96, 96, 96);
 
 let LLM_CALL = null;
