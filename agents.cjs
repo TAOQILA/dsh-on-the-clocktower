@@ -810,6 +810,24 @@ function dialectText(parsed) {
   return w;
 }
 
+/* 续想：Agent 思考的这十几秒里，桌上有人先开口了。带着这些新发言再想一次，
+   让它能改口或补一句，而不是拿一份过时的想法硬说。返回 null 表示没有可用的新想法。 */
+async function continueThink(id, seat, out, opts) {
+  const parsed = parseReply((out && out.text) || '');
+  const draft = String(parsed.say || '').trim();
+  const built = buildPrompt(id, seat, null, opts && opts.mode);
+  const route = routeFor(id, seat);
+  const prompt = built.prompt
+    + '\n\n【就在你刚才思考的这十几秒里，桌上又有人开口了（见上方对话最新几条）】'
+    + (draft ? '\n你刚才准备说的是：「' + draft + '」' : '')
+    + '\n现在结合这些新发言再想一遍：要改口、要回应、要补充，就给出新的 say；觉得没必要改，就把刚才那句原样再输出一次。只输出一个 JSON 对象。';
+  const r = await callModel({ game: id, seat: seat, prompt: prompt, system: playerSystem(id, seat), provider: route.provider, model: route.model, maxTokens: 400 });
+  if (!r || r.error) return null;
+  const p2 = parseReply(r.text || '');
+  if (!p2.say || !String(p2.say).trim()) return null;
+  return { text: r.text, error: null };
+}
+
 /* ---------- 玩家 Agent 一轮（并发模型调用 / 串行落库） ---------- */
 const RUNNING = new Map();
 /* 私聊回复排队：这一局正在跑一轮时，收到的私聊回复请求先存这里，
@@ -1069,6 +1087,7 @@ async function thinkAndSpeak(id, seat, opts) {
   for (;;) {
     round++;
     if (round > 2) break;
+    if (round > 1 && opts.parallel) break;   /* 并行轮不重想：同轮内没有新信息可参考 */
     const built = buildPrompt(id, seat, opts.replyTo, opts.mode);
     const prompt = (round === 1)
       ? built.prompt
@@ -1144,53 +1163,48 @@ async function runRound(id, opts) {
 
   run.promise = (async function () {
     try {
-      /* 严格按座位顺序，一位说完再轮到下一位：每个人的提示词都在上一位落库之后才构建，
-         所以后发言的人能看到先发言的人说了什么，信息才能真正互相影响。
-         （并发虽然快，但所有人同一时刻只拿到同一份旧记录，等于各说各的。） */
-      const outs = [];
+      /* 同时开想、谁先想完谁先开口：
+         所有 Agent 同时开始思考，一轮的耗时≈一次模型调用；谁先想完，就当场把话落库。
+         还在想的人，等调用回来时如果发现「我思考的这段时间里已经有人开口了」，
+         就带着那些新发言再想一遍（续想一次），可以改口或补充——这就是人类桌子的节奏。 */
       const roundStart = Date.now();
-      for (let idx = 0; idx < pool.length; idx++) {
-        const seat = pool[idx];
-        /* 上一位说完先停一下，给玩家插话的机会；玩家真说话了就等到他安静下来 */
-        if (idx > 0) {
-          if (SPEAK_GAP_MS > 0) await sleep(SPEAK_GAP_MS);
-          if (opts.mode !== 'react') await yieldToHuman(id, roundStart);
-          if (!RUNNING.get(id) || !RUNNING.get(id).running) break;
-        }
-        run.current = seat;
-        let out;
-        try {
-          out = await thinkAndSpeak(id, seat, opts);
-        } catch (err) {
-          out = { error: String((err && err.message) || err) };
-        }
-        outs.push({ seat: seat, out: out });
-        await applyOne(id, seat, out, opts, run);
-        run.done++;
-        run.waiting = run.waiting.filter(function (n) { return n !== seat; });
-        /* 有人私聊进来：公聊先暂停，插队把私聊回掉，再接着说——
-           玩家不该等一整轮（好几分钟）才被搭理。 */
-        /* 每一位说完都检查一次私聊队列（包括最后一位）：玩家不该为了等一句回话而整轮排队 */
-        if (dmQueued(id)) {
-          const _dq = DM_QUEUE.get(id);
-          if (_dq && _dq.length) {
-            const _job = _dq.shift();
-            if (_dq.length) DM_QUEUE.set(id, _dq); else DM_QUEUE.delete(id);
-            saveDmQueue(id);
-            const _ds = Number((_job.seats || [])[0]);
-            if (isFinite(_ds) && order.indexOf(_ds) >= 0 && !dmAnswered(id, _job)) {
-              E.log(id, '系统', '有玩家私聊：暂停公开讨论，立刻先回私聊', true);
-              run.current = _ds;
-              let _dout = null;
-              try { _dout = await thinkAndSpeak(id, _ds, { replyTo: _job.replyTo }); }
-              catch (e) { _dout = { error: String((e && e.message) || e) }; }
-              try { await applyOne(id, _ds, _dout, { replyTo: _job.replyTo }, run); } catch (e) {}
-              run.current = seat;
-            }
+      if (opts.mode !== 'react') await yieldToHuman(id, roundStart);
+      if (!RUNNING.get(id) || !RUNNING.get(id).running) { E.log(id, '系统', '本轮已取消'); return; }
+      run.waiting = pool.slice();
+      const _parOpts = Object.assign({}, opts, { parallel: true });
+      const townN = function () {
+        const st0 = E.loadState(id);
+        return (st0.messages || []).filter(function (m) { return !m.channel || m.channel === 'town'; }).length;
+      };
+      let applyChain = Promise.resolve();
+      const _workers = pool.map(function (seat) {
+        return (async function () {
+          if (!RUNNING.get(id) || !RUNNING.get(id).running) return;
+          const seenAtStart = townN();
+          let out;
+          try { out = await thinkAndSpeak(id, seat, _parOpts); }
+          catch (err) { out = { error: String((err && err.message) || err) }; }
+          /* 续想：我思考期间已经有人开口，那我的想法可能过时了，带着新发言再想一次 */
+          if (!out.error && townN() > seenAtStart) {
+            try {
+              const more = await continueThink(id, seat, out, opts);
+              if (more) out = more;
+            } catch (e) { /* 续想失败就用原来的想法开口，不能把话卡住 */ }
           }
-        }
-      }
-      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位依次发言）');
+          applyChain = applyChain.then(async function () {
+            if (!RUNNING.get(id) || !RUNNING.get(id).running) return;
+            run.current = seat;
+            await applyOne(id, seat, out, opts, run);
+            run.done++;
+            run.waiting = run.waiting.filter(function (n) { return n !== seat; });
+            if (SPEAK_GAP_MS > 0) await sleep(SPEAK_GAP_MS);
+          });
+          await applyChain;
+        })();
+      });
+      await Promise.all(_workers);
+      await applyChain;
+      E.log(id, '系统', '本轮 Agent 发言结束（' + pool.length + ' 位同时思考、依次落库）');
     } catch (err) {
       run.error = String((err && err.message) || err);
     } finally {
