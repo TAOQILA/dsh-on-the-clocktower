@@ -491,7 +491,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 /* 座位：悬停轻轻抬起来，拖「你」时也有回应 */
 .seat{transition:left var(--dur-slow) var(--ease),top var(--dur-slow) var(--ease),opacity var(--dur) var(--ease),transform var(--dur-fast) var(--ease)}
-.seat:hover{transform:translateY(-2px)}
+/* 座位用 translate(-50%,-50%) 定位，hover 若只写 translateY 会丢掉居中偏移 → 头像整块往左上跳 */
+.seat:hover{transform:translate(-50%,-50%) translateY(-2px)}
 .seat:hover .token{box-shadow:0 0 0 2px rgba(201,162,39,.45),0 6px 18px rgba(0,0,0,.45)}
 body.night .seat:hover .token{box-shadow:0 0 0 2px rgba(156,143,224,.55),0 6px 18px rgba(0,0,0,.5)}
 
