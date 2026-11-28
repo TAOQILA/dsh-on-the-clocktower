@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.15.25';
+var VERSION = '0.16.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -443,6 +443,8 @@ function render(force){
       '<button class="handle h-dm'+(S.dmUnread?' unread':'')+'" onclick="toggleDm()" title="'+(dmOpen?'收起私聊':'展开私聊')+'" style="right:'+hDmRight+'px;top:'+hDmTop+'">'+ vlabel('私聊栏', dmOpen?'›':'‹') +'</button>' +
     '</div>';
     drawTable(seats,g);
+  motionPass(g, seats);
+  msgMotion();
   fitBubbles();
   restoreScroll(keep);
   restoreInputs(keepInputs, focusInfo);
@@ -535,6 +537,70 @@ function compBar(g, n){
   }).join('');
   return '<div class="compbar" title="本局基础配比：按板子规则的人数配比，未计入任何角色能力带来的增减">'+cells+'</div>';
 }
+/* ===== 动效层 =====
+   整个界面每 2.5 秒重绘一次，所以「入场动画」绝不能用 CSS 直接挂在常驻节点上，
+   否则每次刷新都会重播一遍，看起来就是满屏抖动。
+   这里统一做状态差分：切标签、有人死/复活、昼夜切换、来新消息，才手动打一次类，播完就摘。 */
+var MOTION = { alive:{}, n:null, tab:null, phase:null, seeded:false, seen:{} };
+function motionPass(g, seats){
+  var alive = {}, n = (seats || []).length;
+  (seats || []).forEach(function(s, i){ alive[i] = g ? !!g.alive[i] : true; });
+  /* 切标签：侧栏内容淡入上浮 */
+  if (MOTION.tab !== null && MOTION.tab !== S.tab){
+    var db = document.querySelector('.drawer.side .drawerbody');
+    if (db){ db.classList.remove('anim-in'); void db.offsetWidth; db.classList.add('anim-in'); }
+  }
+  /* 有人死亡 / 复活：头像抖一下 + 一圈扩散光环 */
+  if (g && MOTION.n === n){
+    Object.keys(alive).forEach(function(k){
+      var was = MOTION.alive[k];
+      if (was === undefined || was === alive[k]) return;
+      fxSeat(Number(k), alive[k] ? 'revive' : 'die');
+    });
+  }
+  /* 昼夜切换：整屏扫过一层夜色/晨光 */
+  var ph = g ? g.phase : 'setup';
+  if (MOTION.phase !== null && MOTION.phase !== ph && (ph === 'night' || ph === 'day' || ph === 'dawn')){
+    fxPhase(ph === 'night');
+  }
+  MOTION.alive = alive; MOTION.n = n; MOTION.tab = S.tab; MOTION.phase = ph;
+}
+function fxSeat(i, kind){
+  var el = document.querySelector('.seat[data-seat="' + i + '"]');
+  if (!el) return;
+  el.classList.remove('fx-die', 'fx-revive');
+  void el.offsetWidth;
+  el.classList.add(kind === 'die' ? 'fx-die' : 'fx-revive');
+  var ring = document.createElement('div');
+  ring.className = 'fxring ' + (kind === 'die' ? 'is-die' : 'is-revive');
+  ring.style.left = el.style.left; ring.style.top = el.style.top;
+  var table = document.getElementById('table');
+  if (table) table.appendChild(ring);
+  setTimeout(function(){
+    el.classList.remove('fx-die', 'fx-revive');
+    if (ring.parentNode) ring.parentNode.removeChild(ring);
+  }, 1000);
+}
+function fxPhase(isNight){
+  var w = document.createElement('div');
+  w.className = 'phasewash ' + (isNight ? 'night' : 'day');
+  document.body.appendChild(w);
+  setTimeout(function(){ if (w.parentNode) w.parentNode.removeChild(w); }, 1150);
+}
+function msgMotion(){
+  var nodes = document.querySelectorAll('.msg[data-mk]');
+  if (!nodes.length) return;
+  var fresh = [];
+  for (var i = 0; i < nodes.length; i++){
+    var k = nodes[i].getAttribute('data-mk');
+    if (!MOTION.seeded){ MOTION.seen[k] = 1; continue; }
+    if (!MOTION.seen[k]){ MOTION.seen[k] = 1; fresh.push(nodes[i]); }
+  }
+  var ks = Object.keys(MOTION.seen);
+  if (ks.length > 800){ MOTION.seen = {}; ks.slice(-400).forEach(function(k){ MOTION.seen[k] = 1; }); }
+  fresh.forEach(function(el){ el.classList.add('anim-in'); });
+  MOTION.seeded = true;
+}
 function drawTable(seats,g){
   var table = $('#table'), n = seats.length, cx=50, cy=50, rx=36, ry=36;
   seats.forEach(function(s,i){
@@ -559,12 +625,15 @@ function drawTable(seats,g){
        所以「思考中…」只给当前这位，排队的显示「待发言…」，别让所有人一起闪。 */
     var isThinking = S.showThinking !== false && S.round && S.round.running && Number(S.round.current) === i;
     var isWaiting = S.showThinking !== false && !isThinking && S.round && S.round.running && (S.round.waiting || []).indexOf(i) >= 0;
+    /* 正在思考的那位：头像外圈呼吸式发光，一眼就能看出轮到谁 */
+    if (isThinking) el.classList.add('thinking');
     /* 「我准备好进入提名」标记：白天表态过的人头像右下角显一个小旗，圆桌上就能看出还差谁 */
     var readyNom = !!(S.nomReady && S.nomReady.ready && S.nomReady.ready.indexOf(i) >= 0);
     el.innerHTML = '<div class="bubbles">'+bub+'</div>' +
       '<div class="seatnum" style="background:'+seatColor(i)+';color:#12100c">'+(i+1)+'</div>'+(handUp?'<div class="handup">✋</div>':'')+'<div class="token">'+esc(Array.from(s.name||'').slice(0,2).join(''))+(dead?('<span class="'+crossCls+'" title="'+(deadVoteLeft?'还有一张死亡票':'死亡票已经用掉')+'">✝</span>'):'')+'</div>'+
       '<div class="nameline"><div class="name">'+s.name+(readyNom?'<span class="readyflag" title="已表示准备好进入提名">⚑</span>':'')+'</div>'+(isThinking?'<div class="thinking">思考中…</div>':(isWaiting?'<div class="thinking wait">待发言…</div>':''))+'<div class="role">'+role+'</div><div class="markers">'+marks+'</div></div>';
     el.dataset.zone = 'seat:'+i;
+    el.dataset.seat = i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
     table.appendChild(el);
   });
@@ -1884,7 +1953,7 @@ function chatMsgsHtml(g, channel, peer){
         return (x === 'storyteller') ? '说书人' : ((x + 1) + ' 号' + (seats[x] ? ('·' + seats[x].name) : ''));
       }).join('、') + '</span>';
     }
-    return '<div class="msg ' + cls + '"><span class="who">' + who + '</span>' + tag + toTxt
+    return '<div class="msg ' + cls + '" data-mk="' + esc((m.t || '') + '|' + m.from + '|' + String(m.text || '').length) + '"><span class="who">' + who + '</span>' + tag + toTxt
       + '<div class="mtext">' + hlRoleWords(colorSelfPronoun(hlSeatNums(hlMentions(esc(m.text), lk)), senderColor(g, m.from))) + '</div></div>';
   }).join('');
   return h || '<div class="muted">' + (channel === 'private' ? '还没有私聊。' : '暂无消息') + '</div>';
@@ -1913,6 +1982,7 @@ function paintChat(){
   var nearBottom = (cl.scrollHeight - cl.scrollTop - cl.clientHeight) < 28;
   cl.setAttribute('data-count', String((S.chatMsgs || []).length));
   cl.innerHTML = chatMsgsHtml(S.game, 'town');
+  msgMotion();
   if (nearBottom) { cl.scrollTop = cl.scrollHeight; S.chatSeen = (S.chatMsgs || []).length; }
 }
 function paintDm(){
@@ -1921,6 +1991,7 @@ function paintDm(){
   var nearBottom = (dl.scrollHeight - dl.scrollTop - dl.clientHeight) < 28;
   var _peer = (S.dmTo && S.dmTo.length) ? String(S.dmTo[0]) : '';
   dl.innerHTML = chatMsgsHtml(S.game, 'private', _peer);
+  msgMotion();
   if (nearBottom) dl.scrollTop = dl.scrollHeight;
 }
 function chatSelfLabel(g){

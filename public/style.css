@@ -472,3 +472,71 @@ body.night .dmtyping{color:#a9a0c4}
 .roleword{text-decoration:underline;text-decoration-color:rgba(217,182,106,.85);text-underline-offset:3px;text-decoration-thickness:1.5px;cursor:pointer;transition:color .15s}
 .roleword:hover{color:var(--gold)}
 body.night .roleword{text-decoration-color:rgba(178,203,255,.85)}
+
+/* ===== 动效层：移动 / 变化 / 交互 统一时间与缓动 ===== */
+:root{--ease:cubic-bezier(.22,.75,.24,1);--dur-fast:.16s;--dur:.24s;--dur-slow:.45s}
+
+/* 所有可点、可输入、会变色的元素：统一过渡，不再硬切 */
+button,.tab,.pill,.dmtab,.handle,.seat,.token,.seatnum,.dmconv,.roleword,.badge,input,select,textarea,.chatwrap h3,.seat .name{
+  transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),box-shadow var(--dur-slow) var(--ease),
+    transform var(--dur-fast) var(--ease),opacity var(--dur) var(--ease),filter var(--dur) var(--ease);}
+button:hover:not(:disabled),.tab:hover,.dmtab:hover,.pill:hover{transform:translateY(-1px)}
+button:active:not(:disabled),.tab:active,.dmtab:active,.handle:active,.pill:active{transform:translateY(0) scale(.97)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.tab:focus-visible{
+  outline:none;box-shadow:0 0 0 2px rgba(201,162,39,.55)}
+
+/* 座位：悬停轻轻抬起来，拖「你」时也有回应 */
+.seat{transition:left var(--dur-slow) var(--ease),top var(--dur-slow) var(--ease),opacity var(--dur) var(--ease),transform var(--dur-fast) var(--ease)}
+.seat:hover{transform:translateY(-2px)}
+.seat:hover .token{box-shadow:0 0 0 2px rgba(201,162,39,.45),0 6px 18px rgba(0,0,0,.45)}
+body.night .seat:hover .token{box-shadow:0 0 0 2px rgba(156,143,224,.55),0 6px 18px rgba(0,0,0,.5)}
+
+/* 有人死亡：头像灰掉转半圈再回来，名字闪一下；复活反过来带金光 */
+@keyframes seatDie{0%{transform:scale(1) rotate(0);filter:none}
+  35%{transform:scale(.88) rotate(-5deg);filter:grayscale(1) brightness(.55)}
+  70%{transform:scale(1.05) rotate(2deg);filter:grayscale(.25)}100%{transform:scale(1) rotate(0);filter:none}}
+.seat.fx-die .token{animation:seatDie .82s var(--ease)}
+@keyframes nameFade{0%{opacity:1}35%{opacity:.3}100%{opacity:1}}
+.seat.fx-die .nameline{animation:nameFade 1s var(--ease)}
+@keyframes seatRevive{0%{transform:scale(.86);box-shadow:0 0 0 rgba(255,214,130,0)}
+  45%{transform:scale(1.09);box-shadow:0 0 26px rgba(255,214,130,.85)}
+  100%{transform:scale(1);box-shadow:0 0 0 rgba(255,214,130,0)}}
+.seat.fx-revive .token{animation:seatRevive .9s var(--ease)}
+.fxring{position:absolute;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;
+  pointer-events:none;z-index:4;animation:ringOut 1s var(--ease) both}
+.fxring.is-die{border:2px solid rgba(224,88,88,.85);box-shadow:inset 0 0 22px rgba(224,88,88,.45)}
+.fxring.is-revive{border:2px solid rgba(255,214,130,.9);box-shadow:inset 0 0 24px rgba(255,214,130,.5)}
+@keyframes ringOut{0%{transform:scale(.45);opacity:0}25%{opacity:1}100%{transform:scale(1.9);opacity:0}}
+
+/* 昼夜切换：整屏扫过一层夜色 / 晨光，配合背景 1.8s 渐变 */
+.phasewash{position:fixed;inset:0;z-index:70;pointer-events:none;animation:washOut 1.05s var(--ease) both}
+.phasewash.night{background:radial-gradient(120% 92% at 50% 46%,rgba(88,74,168,0) 32%,rgba(52,40,112,.62) 100%)}
+.phasewash.day{background:radial-gradient(120% 92% at 50% 46%,rgba(255,206,120,0) 30%,rgba(255,184,92,.46) 100%)}
+@keyframes washOut{0%{opacity:0}28%{opacity:1}100%{opacity:0}}
+
+/* 新消息：从说话人那一侧滑进来 */
+.msg{transition:background-color var(--dur) var(--ease)}
+.msg:hover{background:rgba(255,255,255,.035)}
+.msg.anim-in{animation:msgIn .32s var(--ease)}
+@keyframes msgIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+
+/* 切标签：侧栏内容淡入上浮 */
+.drawerbody.anim-in{animation:panelIn .3s var(--ease)}
+@keyframes panelIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* 抽屉里的分组标题与卡片：轻微错落上浮（只在切标签时由 .anim-in 触发） */
+.drawerbody.anim-in .section,.drawerbody.anim-in .idcard{animation:cardIn .34s var(--ease) both}
+@keyframes cardIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* 尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001s !important;animation-iteration-count:1 !important;transition-duration:.001s !important}
+}
+
+/* 轮到谁开口：头像外圈呼吸发光 */
+@keyframes thinkRing{0%,100%{box-shadow:0 0 0 0 rgba(255,215,106,0),0 0 0 0 rgba(255,215,106,0)}
+  50%{box-shadow:0 0 0 4px rgba(255,215,106,.34),0 0 20px rgba(255,215,106,.45)}}
+.seat.thinking .token{animation:thinkRing 1.5s ease-in-out infinite}
+body.night .seat.thinking .token{animation:thinkRingNight 1.5s ease-in-out infinite}
+@keyframes thinkRingNight{0%,100%{box-shadow:0 0 0 0 rgba(156,143,224,0)}50%{box-shadow:0 0 0 4px rgba(156,143,224,.42),0 0 22px rgba(156,143,224,.55)}}
