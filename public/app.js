@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.17.1';
+var VERSION = '0.17.2';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -382,10 +382,11 @@ function badgeInner(g, seats){
 function shellSig(){
   var g = S.game;
   var vw = Math.max(320, window.innerWidth);
-  return [ g?g.id:'setup', S.tab||'', S.hideSide?1:0, S.hideChat?1:0, S.showDm?1:0,
+  /* 抽屉开合、私聊视图不进结构指纹：交给 applyDrawers 改现有节点，整页重建会打断 transition */
+  return [ g?g.id:'setup', S.tab||'',
     Math.round(vw/40), (g?g.seats.length:(S.seats||[]).length), (S.fontScale||1),
     (g&&g.script)?g.script:((S.script&&S.script.name)||''),
-    (g&&g.win&&g.win.over)?1:0, (S.dmView||'list'), String((S.dmTo||[]).join(',')) ].join('|');
+    (g&&g.win&&g.win.over)?1:0 ].join('|');
 }
 /* 侧栏内容指纹：不同页签看不同字段，避免「设置页打字到一半被重画」 */
 function sideSig(){
@@ -421,10 +422,63 @@ function paintSideIfNeeded(){
     if (id && Object.prototype.hasOwnProperty.call(keep, id)) ins2[j].value = keep[id];
   }
 }
+/* 抽屉开合不再整页重建：直接改现有节点的 transform，CSS 的 .28s transition 才能播出来 */
+function applyDrawers(){
+  var g = S.game;
+  var vw = Math.max(320, window.innerWidth);
+  var sideW = Math.min(440, Math.round(vw * 0.40));
+  var chatW = Math.min(460, Math.round(vw * 0.44));
+  var dmW = chatW, HAN = 30, DMPAD = 16;
+  var sideOpen = !S.hideSide, chatOpen = !S.hideChat, dmOpen = !!S.showDm;
+  var dmRight = dmOpen ? (chatOpen ? chatW + HAN + DMPAD : 0) : 0;
+  var lay = document.querySelector('.layout');
+  if (lay){
+    lay.classList.toggle('side-open', sideOpen);
+    lay.classList.toggle('chat-open', chatOpen);
+    lay.classList.toggle('dm-open', dmOpen);
+  }
+  var sd = document.querySelector('.drawer.side');
+  if (sd){ sd.style.width = sideW + 'px'; sd.style.transform = 'translateX(' + (sideOpen ? '0' : '-100%') + ')'; }
+  var cd = document.querySelector('.drawer.chat');
+  if (cd){ cd.style.width = chatW + 'px'; cd.style.transform = 'translateX(' + (chatOpen ? '0' : '100%') + ')'; }
+  var dd = document.querySelector('.drawer.dm');
+  if (dd){
+    dd.style.width = dmW + 'px'; dd.style.right = dmRight + 'px';
+    dd.classList.toggle('roundright', chatOpen && dmOpen);
+    dd.style.transform = 'translateX(' + (dmOpen ? '0' : '100%') + ')';
+  }
+  /* 拉手跟着面板走，箭头方向也翻转 */
+  var hs = document.querySelector('.handle.h-side');
+  if (hs){ hs.style.left = (sideOpen ? sideW : 0) + 'px'; hs.title = sideOpen ? '收起侧栏' : '展开侧栏';
+    var s1 = hs.querySelector('.harrow'); if (s1) s1.textContent = sideOpen ? '\u2039' : '\u203a'; }
+  var hChatRight, hChatTop = '50%', hDmRight, hDmTop = '50%';
+  if (chatOpen && dmOpen) { hChatRight = chatW; hDmRight = dmRight + dmW; }
+  else if (chatOpen) { hChatRight = chatW; hDmRight = 0; }
+  else if (dmOpen) { hDmRight = dmW; hChatRight = 0; }
+  else { hChatRight = 0; hDmRight = HAN; }
+  var hc = document.querySelector('.handle.h-chat');
+  if (hc){ hc.style.right = hChatRight + 'px'; hc.style.top = hChatTop; hc.title = chatOpen ? '收起公聊' : '展开公聊';
+    var s2 = hc.querySelector('.harrow'); if (s2) s2.textContent = chatOpen ? '\u203a' : '\u2039'; }
+  var hd = document.querySelector('.handle.h-dm');
+  if (hd){ hd.style.right = hDmRight + 'px'; hd.style.top = hDmTop; hd.title = dmOpen ? '收起私聊' : '展开私聊';
+    var s3 = hd.querySelector('.harrow'); if (s3) s3.textContent = dmOpen ? '\u203a' : '\u2039'; }
+  /* 私聊面板内容（消息、对象、视图）变了才重画，保留正在输入的文字 */
+  var dmSig = [g ? g.id : '', dmOpen ? 1 : 0, S.dmView || 'list', String((S.dmTo || []).join(',')),
+    ((S.chatMsgs || []).length), (g ? g.phase : '')].join('|');
+  if (dmSig !== S.paintDmSig){
+    S.paintDmSig = dmSig;
+    if (dd && g){
+      var inp = document.getElementById('dmInput'); var val = inp ? inp.value : '';
+      dd.innerHTML = dmPanel(g);
+      var inp2 = document.getElementById('dmInput'); if (inp2) inp2.value = val;
+    }
+  }
+}
 /* 结构没变：只刷新徽章、左上角、圆桌、提名浮层、拉手未读标记 */
 function updateDynamic(){
   var g = S.game, seats = g?g.seats:S.seats;
   applyPhaseTheme();
+  applyDrawers();
   var badge = document.getElementById('badge');
   if (badge) badge.innerHTML = badgeInner(g, seats);
   var dock = document.getElementById('dock');
@@ -784,7 +838,8 @@ function vlabel(text, arrow){
 function toggleSide(){
   S.hideSide = !S.hideSide;
   savePrefs();
-  render(true);
+  applyDrawers();
+  S.pageSig = pageSig();
   setTimeout(placeMe, 0);
 }
 /* 侧边栏不透明度（0–100，默认 75） */
@@ -805,7 +860,8 @@ function toggleChat(){
   S.hideChat = !S.hideChat;
   if (!S.hideChat) S.chatUnread = 0;
   savePrefs();
-  render(true);
+  applyDrawers();
+  S.pageSig = pageSig();
   setTimeout(placeMe, 0);
 }
 function dropMe(zone, seat){
@@ -2221,7 +2277,8 @@ function toggleDmTo(el){
 function toggleDm(){
   S.showDm = !S.showDm;
   if (S.showDm) { S.dmUnread = 0; S.dmUnreadBy = {}; S.dmView = 'list'; }
-  render(true);
+  applyDrawers();
+  S.pageSig = pageSig();
 }
 /* 私聊浮层：绝对定位盖在圆桌之上，展开/收起都不影响其它框的布局 */
 function dmFloating(g){
