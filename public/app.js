@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.17.4';
+var VERSION = '0.17.5';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -1301,10 +1301,16 @@ function nomVoteOverlay(){
   var tn = (cur.target + 1) + ' 号 ' + ((seats[cur.target]||{}).name||'');
   var meta = S.nom || {};
   var mine = meta.deadVoteUsed ? !!meta.deadVoteUsed[mySeat] : false;
-  var locked = (stage === 'clock');
+  /* 时钟阶段不是整体锁死：只有时钟已经转过你的座位，这一票才算锁定。
+     以前写 var locked = (stage === 'clock')，结果时钟一开始按钮就全没了（m14765）。 */
+  var myPos = (cur.order && cur.order.indexOf) ? cur.order.indexOf(mySeat) : -1;
+  var ptrNow = (typeof cur.ptr === 'number') ? cur.ptr : -1;
+  var passed = (stage === 'clock') && (myPos < 0 || myPos < ptrNow);
+  var locked = passed;
   var myHand = cur.hands ? cur.hands[mySeat] : undefined;
   var tip;
-  if (locked) tip = (myHand === undefined) ? '时钟轮转中，你还没表态' : (myHand ? '已举手 ✋（时钟转过即锁定）' : '已选择不举手 ✊');
+  if (passed) tip = myHand ? '时钟已经转过你的座位：你举了手 ✋' : '时钟已经转过你的座位：你没有举手 ✊';
+  else if (stage === 'clock') tip = (myHand === undefined) ? '时钟轮转中，你还没表态（还来得及改）' : (myHand ? '已举手 ✋（轮到你时就锁定）' : '已选择不举手 ✊（还来得及改）');
   else if (myHand === undefined) tip = '要不要举手赞成处决 ' + tn + '？';
   else tip = myHand ? '你已举手赞成 ✋' : '你已选择不举手 ✊';
   var h = '<div class="nomfloat" id="nomFloat">';

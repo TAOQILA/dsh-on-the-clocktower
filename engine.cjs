@@ -1192,10 +1192,19 @@ function nomSpeech(id, kind, text){
 function nomHand(id, seat, yes){
   const s = nomEnsure(id);
   if (!s.nom.cur) return { ok:false, error:'当前没有提名' };
-  if (s.nom.stage !== 'vote') return { ok:false, error:'现在不在投票阶段' };
+  /* 时钟阶段也要能举手：时钟是按座位逐个统计的，还没转到自己之前随时可以改。 */
+  const stgH = s.nom.stage;
+  if (stgH !== 'vote' && stgH !== 'clock') return { ok:false, error:'现在不在投票阶段' };
   seat = Number(seat);
   if (!(seat >= 0 && seat < s.seats.length)) return { ok:false, error:'座位越界' };
   if (!s.alive[seat] && s.deadVoteUsed && s.deadVoteUsed[seat]) return { ok:false, error:'死者的投票标记已经用掉了' };
+  if (stgH === 'clock') {
+    const curH = s.nom.cur;
+    const pos = Array.isArray(curH.order) ? curH.order.indexOf(seat) : -1;
+    const ptr = (typeof curH.ptr === 'number') ? curH.ptr : -1;
+    if (pos < 0) return { ok:false, error:'你的座位不在本次时钟里' };
+    if (pos < ptr) return { ok:false, error:'时钟已经转过你的座位，这一票已经锁定' };
+  }
   /* 管家：主人没举手时不能投票 */
   if (s.alive[seat] && roleOfSeat(s, seat) === '管家' && yes) {
     const master = butlerMaster(s, seat);
