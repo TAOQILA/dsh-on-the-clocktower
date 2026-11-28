@@ -31,6 +31,15 @@ function appendJsonl(file, obj){
 function idOf(id, seat){ return path.join(gameDir(id), 'agents', 'seat-'+String(seat).padStart(2,'0')); }
 
 function createGame(cfg){
+  /* 剧本规模校验：大型剧本 7 人起（暗流涌动 5 人起），小型剧本 5–6 人 */
+  const sd = scriptData(cfg.script);
+  const lo = (sd && Number(sd.minPlayers)) || 5;
+  const hi = (sd && Number(sd.maxPlayers)) || 12;
+  const seatN = Array.isArray(cfg.seats) ? cfg.seats.length : 0;
+  if (seatN < lo || seatN > hi) {
+    return { ok: false, error: '「' + cfg.script + '」是' + ((sd && sd.size === 'large') ? '大型' : '小型') +
+      '剧本，人数需在 ' + lo + '–' + hi + ' 人之间（当前 ' + seatN + ' 人）' };
+  }
   // 同一分钟内同配置连续开局时自动加序号，避免覆盖上一局
   const base = stamp()+'_'+cfg.script+'_'+cfg.seats.length+'人';
   let id = base, n = 2;
@@ -966,6 +975,7 @@ function roleInfoAll(){
 let ROLE_LIST_CACHE = null;
 function createAndStart(cfg){
   const s = createGame(cfg);
+  if (!s || s.ok === false) return s;
   const idxFile = path.join(__dirname, 'data', 'wiki', 'INDEX.md');
   const idx = fs.existsSync(idxFile) ? fs.readFileSync(idxFile, 'utf8') : '';
   const ack = 'READ_ACK:init ' + idx.slice(0, 20);

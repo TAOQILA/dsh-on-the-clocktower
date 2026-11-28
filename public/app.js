@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.16.0';
+var VERSION = '0.17.0';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -343,6 +343,112 @@ function restoreInputs(vals, focusInfo){
     }
   } catch (e) {}
 }
+/* ================= 增量渲染 ================= */
+/* 整页 innerHTML 重建会打断动画、hover、输入；只有结构真的变了才重建整页。 */
+function tabsHtmlFn(){
+  var h = '';
+  TAB_ROWS.forEach(function(row){
+    h += '<div class="tabrow">';
+    row.forEach(function(t){
+      h += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\'' + t + '\')">'+TABS[t]+'</button>';
+    });
+    h += '</div>';
+  });
+  return h;
+}
+function panelFor(tab){
+  var g = S.game, seats = g?g.seats:S.seats, sel = seats[S.selSeat]||{};
+  var roleNames = S.script?S.script.roles:[], cur = g?g.phase:'setup';
+  if (tab==='setup') return setupPanel();
+  if (tab==='ai') return aiPanel(seats,sel);
+  if (tab==='story') return storyPanel(seats,sel,roleNames,cur);
+  if (tab==='log') return logPanel(g);
+  if (tab==='wiki') return wikiPanel();
+  if (tab==='cheat') return cheatPanel(seats,sel);
+  if (tab==='settings') return settingsPanel();
+  return gamePanel(seats,sel);
+}
+function badgeInner(g, seats){
+  var cur = g?g.phase:'setup';
+  if (g && g.win && g.win.over) return winBanner(g);
+  var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
+  return '<div class="phase">'+(PHZH[cur]||cur)+'</div>' +
+    '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>' +
+    compBar(g, seats.length) +
+    '<div class="story">'+story+'</div>' +
+    ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '');
+}
+/* 结构指纹：只有它变了才允许整页重建 */
+function shellSig(){
+  var g = S.game;
+  var vw = Math.max(320, window.innerWidth);
+  return [ g?g.id:'setup', S.tab||'', S.hideSide?1:0, S.hideChat?1:0, S.showDm?1:0,
+    Math.round(vw/40), (g?g.seats.length:(S.seats||[]).length), (S.fontScale||1),
+    (g&&g.script)?g.script:((S.script&&S.script.name)||''),
+    (g&&g.win&&g.win.over)?1:0, (S.dmView||'list'), String((S.dmTo||[]).join(',')) ].join('|');
+}
+/* 侧栏内容指纹：不同页签看不同字段，避免「设置页打字到一半被重画」 */
+function sideSig(){
+  var g = S.game, t = S.tab || '';
+  if (t==='setup') return ['setup',(S.script&&S.script.name),(S.seats||[]).length,JSON.stringify(S.seats||[]),JSON.stringify(S.me),S.startError||''].join('|');
+  if (t==='settings') return 'settings';
+  if (t==='ai') return ['ai',JSON.stringify((g?g.seats:S.seats)||[]),JSON.stringify(S.me),(S.script&&S.script.name)||'',g?g.id:''].join('|');
+  if (t==='wiki') return ['wiki',S.wikiQ||'',S.wikiPage||'',S.wikiCat||'',(S.wikiCache?1:0)].join('|');
+  if (t==='game') return ['game',g?g.id:'',(S.selSeat|0),g?JSON.stringify(g.markers||{}):'',g?JSON.stringify(g.roles||{}):'',S.view?JSON.stringify(S.view):'',g?(g.win&&g.win.over?1:0):0].join('|');
+  if (t==='story') return ['story',g?g.phase:'',g?g.day:0,g?g.night:0,
+    S.story?((S.story.running?1:0)+'/'+(S.story.done||'')+'/'+String((S.story.result&&S.story.result.say)||'').slice(0,60)):'',
+    (S.nightState&&S.nightState.step)?String(S.nightState.step.i):'',
+    S.round?((S.round.running?1:0)+'/'+S.round.current+'/'+S.round.done):'',
+    g?(g.win&&g.win.over?1:0):0].join('|');
+  if (t==='log') return ['log',g?(g.log||[]).length:'',g?g.phase:''].join('|');
+  if (t==='cheat') return ['cheat',g?g.id:'',(S.selSeat|0),((S.storyLog||[]).length),g?(g.win&&g.win.over?1:0):0,g?String((g.alive||[]).join('')):''].join('|');
+  return 'other|'+t;
+}
+/* 侧栏内容变了才重画侧栏（保留输入框内容） */
+function paintSideIfNeeded(){
+  var body = document.querySelector('.drawer.side .drawerbody');
+  if (!body) return;
+  var sig = sideSig();
+  if (sig === S.sideSig) return;
+  S.sideSig = sig;
+  var keep = {};
+  var ins = body.querySelectorAll('input,textarea,select');
+  for (var i = 0; i < ins.length; i++){ if (ins[i].id) keep[ins[i].id] = ins[i].value; }
+  body.innerHTML = '<div class="tabs">'+tabsHtmlFn()+'</div>' + panelFor(S.tab);
+  var ins2 = body.querySelectorAll('input,textarea,select');
+  for (var j = 0; j < ins2.length; j++){
+    var id = ins2[j].id;
+    if (id && Object.prototype.hasOwnProperty.call(keep, id)) ins2[j].value = keep[id];
+  }
+}
+/* 结构没变：只刷新徽章、左上角、圆桌、提名浮层、拉手未读标记 */
+function updateDynamic(){
+  var g = S.game, seats = g?g.seats:S.seats;
+  applyPhaseTheme();
+  var badge = document.getElementById('badge');
+  if (badge) badge.innerHTML = badgeInner(g, seats);
+  var dock = document.getElementById('dock');
+  if (dock) dock.innerHTML = stBox(g) + specBox();
+  var na = document.getElementById('nomarea');
+  if (na){ var nh = nomVoteOverlay(); if (na.innerHTML !== nh) na.innerHTML = nh; }
+  var hc = document.querySelector('.handle.h-chat');
+  if (hc) hc.classList.toggle('unread', !!S.chatUnread);
+  var hd = document.querySelector('.handle.h-dm');
+  if (hd) hd.classList.toggle('unread', !!S.dmUnread);
+  drawTable(seats, g);
+  paintSideIfNeeded();
+  motionPass(g, seats);
+  fitBubbles();
+  placeMe();
+}
+/* 指纹变了怎么办：结构变→整页重建；否则只局部刷新 */
+function sigApply(){
+  var sg = pageSig();
+  if (sg === S.pageSig) { paintChatIfNeeded(); return; }
+  S.pageSig = sg;
+  if (shellSig() !== S.shellSig) render();
+  else updateDynamic();
+}
 function render(force){
   /* 以前只要焦点在输入框里就整体放弃重绘，结果「有人死了」「天黑了」这些状态要手动刷新才看得见。
      现在照常重绘，但先把输入框里的内容和光标位置记下来，重绘后原样还回去。 */
@@ -370,24 +476,9 @@ function render(force){
   applyPanelAlpha();
   var sel = seats[S.selSeat]||{};
   var roleNames = S.script?S.script.roles:[];
-  var tabsHtml = '';
-  TAB_ROWS.forEach(function(row){
-    tabsHtml += '<div class="tabrow">';
-    row.forEach(function(t){
-      tabsHtml += '<button class="'+(S.tab===t?'active':'')+'" onclick="setTab(\''+t+'\')">'+TABS[t]+'</button>';
-    });
-    tabsHtml += '</div>';
-  });
-  var panel = '';
+  var tabsHtml = tabsHtmlFn();
+  var panel = panelFor(S.tab);
   var idCard = '';
-  if (S.tab==='setup') panel = setupPanel();
-  else if (S.tab==='ai') panel = aiPanel(seats,sel);
-  else if (S.tab==='story') panel = storyPanel(seats,sel,roleNames,cur);
-  else if (S.tab==='log') panel = logPanel(g);
-  else if (S.tab==='wiki') panel = wikiPanel();
-  else if (S.tab==='cheat') panel = cheatPanel(seats,sel);
-  else if (S.tab==='settings') panel = settingsPanel();
-  else panel = gamePanel(seats,sel);
   var hdr = g?('对局 '+g.id):'未开局';
   var story = g?('第'+(g.night||0)+'夜 / 第'+(g.day||0)+'天'):'setup 阶段';
   /* ---- 布局尺寸：圆桌永远居中，两侧面板都是覆盖式抽屉 ---- */
@@ -422,17 +513,9 @@ function render(force){
     '<header><span class="logo">染</span><span class="header-title">血染钟鱼 · 魔典</span><span class="sub">'+hdr+'</span><span class="version">v'+VERSION+'</span></header>' +
     '<div class="layout'+(sideOpen?' side-open':'')+(chatOpen?' chat-open':'')+(dmOpen?' dm-open':'')+'">' +
       '<div class="left">'+ cornerDock(g) +'<div class="table" id="table">'+
-        '<div class="center-badge">'+
-        ((g && g.win && g.win.over) ? winBanner(g) : (
-          '<div class="phase">'+(PHZH[cur]||cur)+'</div>'+
-          '<div class="scriptline">'+(g&&g.script?esc(g.script):(S.script&&S.script.name?esc(S.script.name):'未选剧本'))+'</div>'+
-          compBar(g, seats.length) +
-          '<div class="story">'+story+'</div>'+
-          ((S.showTimer !== false && g && g.phase==='day' && g.dayStarted) ? ('<div class="daytimer" id="dayTimer">白天 '+ dayClock(g) +'</div>') : '')
-        ))+
-        '</div>'+
+        '<div class="center-badge" id="badge">'+badgeInner(g, seats)+'</div>'+
       '</div></div>' +
-      nomVoteOverlay() +
+      '<div id="nomarea">'+nomVoteOverlay()+'</div>' +
       /* 左侧栏：抽屉，覆盖在圆桌上方 */
       '<aside class="drawer side" style="width:'+sideW+'px;transform:translateX('+(sideOpen?'0':'-100%')+')">'+ sideInner +'</aside>' +
       '<button class="handle h-side" onclick="toggleSide()" title="'+(sideOpen?'收起侧栏':'展开侧栏')+'" style="left:'+(sideOpen?sideW:0)+'px;top:50%">'+ vlabel('侧边栏', sideOpen?'‹':'›') +'</button>' +
@@ -448,6 +531,9 @@ function render(force){
   fitBubbles();
   restoreScroll(keep);
   restoreInputs(keepInputs, focusInfo);
+  S.shellSig = shellSig();
+  S.sideSig = sideSig();
+  S.pageSig = pageSig();
 }
 /* 气泡字数太多时自动缩小字号来适应固定大小的气泡：
    从 11px 起逐级降到 7.5px；仍放不下就裁掉剩余内容并加省略号，保证永远不出框。 */
@@ -603,10 +689,14 @@ function msgMotion(){
 }
 function drawTable(seats,g){
   var table = $('#table'), n = seats.length, cx=50, cy=50, rx=36, ry=36;
+  /* 增量更新：座位节点复用，否则 hover、呼吸光圈、气泡动画每 2.5 秒被打断 */
+  var live = {}, olds = table.querySelectorAll('.seat');
+  for (var oi = 0; oi < olds.length; oi++) live[olds[oi].dataset.seat] = olds[oi];
   seats.forEach(function(s,i){
     var a = -Math.PI/2 + 2*Math.PI*i/n;
     var x = cx+rx*Math.cos(a), y = cy+ry*Math.sin(a);
-    var el = document.createElement('div');
+    var el = live[i];
+    if (!el){ el = document.createElement('div'); el.dataset.seat = i; }
     var dead = g && !g.alive[i];
     var mine = g ? (s.type==='human') : (meZone()==='seat' && S.me.seat===i);
     el.className = 'seat '+(mine?'human':'agent')+(dead?' dead':'')+(S.selSeat===i?' selected':'');
@@ -635,8 +725,10 @@ function drawTable(seats,g){
     el.dataset.zone = 'seat:'+i;
     el.dataset.seat = i;
     el.onclick = function(){ S.selSeat=i; if(S.holdMe){ S.me={zone:'seat',seat:i}; S.holdMe=false; } render(); };
-    table.appendChild(el);
+    if (!el.parentNode) table.appendChild(el);
+    delete live[i];
   });
+  Object.keys(live).forEach(function(k){ if (live[k] && live[k].parentNode) live[k].parentNode.removeChild(live[k]); });
   placeMe();
 }
 function meZone(){ return (S.me && S.me.zone) ? S.me.zone : 'spectator'; }
@@ -681,7 +773,7 @@ function specBox(){
 }
 /* 左上角竖向停靠区：说书人在上、旁观席在下，两者各占一行不会重叠 */
 function cornerDock(g){
-  return '<div class="dock">' + stBox(g) + specBox() + '</div>';
+  return '<div class="dock" id="dock">' + stBox(g) + specBox() + '</div>';
 }
 /* 左栏（聊天）收起 / 展开 */
 /* 右侧面板栏收起 / 展开 */
@@ -792,11 +884,12 @@ function setupPanel(){
       '<button onclick="leaveGame()">离开本局，回到建局</button></div>'+
       '<p class="muted">离开只是把这一局从界面收起，对局文件仍保存在 data/games/ 下，可在「日志」里重新打开。</p></div>';
   }
-  var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+s.roles.length+'角色）',S.script.name); }).join('');
+  var scripts = S.scripts.map(function(s){ return opt(s.name,s.name+'（'+(s.size==='large'?'大型':'小型')+' · '+s.roles.length+'角色）',S.script.name); }).join('');
   var pills = '';
   return '<div class="section"><h3>建局配置</h3>'+
     '<p class="muted">先在这里定下剧本、人数、谁是「你」以及各座位的昵称；每个座位用哪个模型请到「AI 设置」页配置。</p>'+
     '<div class="row">剧本：<select onchange="S.script=S.scripts.find(x=>x.name===this.value);if(S.script)resizeSeats(S.seats.length);savePrefs();render()">'+scripts+'</select></div>'+
+    '<div class="row">规模：<b>'+(S.script&&S.script.size==='large'?'大型剧本':'小型剧本')+'</b><span class="muted">'+(S.script&&S.script.minPlayers?('（'+S.script.minPlayers+'–'+S.script.maxPlayers+' 人'+(S.script.sizeNote?'，'+S.script.sizeNote:'')+'）'):'')+'</span></div>'+
     '<div class="row">人数：<input id="seatCount" type="number" min="'+((S.script&&S.script.minPlayers)||5)+'" max="'+((S.script&&S.script.maxPlayers)||12)+'" value="'+S.seats.length+'" style="width:60px" title="人数范围由所选剧本决定">'+
     '<button onclick="resizeSeats(+document.getElementById(\'seatCount\').value);render()">应用人数</button></div>'+
     '<div class="row">你的位置：<b>'+meZoneLabel()+'</b></div>'+
@@ -969,6 +1062,12 @@ async function renameStory(name){
 }
 async function startGame(){
   if (S.starting) return;
+  /* 剧本规模守卫：大型剧本 7 人起（暗流涌动 5 人起），小型剧本 5–6 人 */
+  var _sd = S.script || {}, _lo = Number(_sd.minPlayers) || 5, _hi = Number(_sd.maxPlayers) || 12;
+  if ((S.seats || []).length < _lo || (S.seats || []).length > _hi) {
+    S.startError = '「' + (_sd.name || '当前剧本') + '」人数需在 ' + _lo + '–' + _hi + ' 人之间（当前 ' + (S.seats || []).length + ' 人）';
+    render(); return;
+  }
   var zone = meZone();
   var seatsNew = S.seats.map(function(s,i){
     return { seat:i, name:s.name, type:(zone==='seat' && S.me.seat===i) ? 'human' : 'agent', provider:s.provider||'', model:s.model||'' };
@@ -1088,8 +1187,7 @@ function pollNom(){
   S.nomPolling = true;
   setTimeout(async function(){
     try { await loadNom(); } catch(e) {}
-    var sigN = pageSig();
-    if (sigN !== S.pageSig) { S.pageSig = sigN; render(); }
+    sigApply();
     if (S.game && nomActive()) pollNom(); else S.nomPolling = false;
   }, 900);
 }
@@ -1402,8 +1500,7 @@ function pollStory(){
   if(!S.game) return;
   setTimeout(async function(){
     try { S.story = await api('storyStatus',{id:S.game.id}); } catch(e){ S.story = {running:false,error:String((e&&e.message)||e)}; }
-    var sg = pageSig();
-    if (sg !== S.pageSig) { S.pageSig = sg; render(); } else paintChatIfNeeded();
+    sigApply();
     if (S.story && S.story.running) pollStory(); else refresh();
   }, 1500);
 }
@@ -2533,15 +2630,12 @@ async function refresh(){
      ① 以前只要焦点在输入框里，render() 就整体让路，别人的新消息要等自己发一句才出现；
      ② 以前每 3 秒无条件重建整页 innerHTML，人眼会看到抽搐。 */
   await loadChat(true);
-  var sigNow = pageSig();
-  if (sigNow !== S.pageSig) { S.pageSig = sigNow; render(); }
-  else paintChatIfNeeded();
+  sigApply();
   if(S.tab==='wiki') loadWiki();
   /* 作弊页停留时持续拉取说书人日志：它正在思考时也要能一行行看到 */
   if(S.tab==='cheat' && S.game){
-    var before = S.storyLog ? S.storyLog.length : -1;
     await loadStoryLog();
-    if (S.storyLog && S.storyLog.length !== before) render(true);
+    sigApply();
   }
 }
 setInterval(function(){ try { Promise.resolve(refresh()).catch(function(){}); } catch (e) {} }, 2500);

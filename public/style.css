@@ -481,8 +481,11 @@ button,.tab,.pill,.dmtab,.handle,.seat,.token,.seatnum,.dmconv,.roleword,.badge,
   transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease),
     border-color var(--dur) var(--ease),box-shadow var(--dur-slow) var(--ease),
     transform var(--dur-fast) var(--ease),opacity var(--dur) var(--ease),filter var(--dur) var(--ease);}
-button:hover:not(:disabled),.tab:hover,.dmtab:hover,.pill:hover{transform:translateY(-1px)}
-button:active:not(:disabled),.tab:active,.dmtab:active,.handle:active,.pill:active{transform:translateY(0) scale(.97)}
+button:hover:not(:disabled):not(.handle),.tab:hover,.dmtab:hover,.pill:hover{transform:translateY(-1px)}
+/* 拉手本身用 translateY(-50%) 垂直居中，通用 hover 位移会把它顶上去一半高度 → 单独处理 */
+.handle:hover{transform:translateY(-50%) translateX(2px)}
+.handle:active{transform:translateY(-50%) scale(.97)}
+button:active:not(:disabled):not(.handle),.tab:active,.dmtab:active,.pill:active{transform:translateY(0) scale(.97)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.tab:focus-visible{
   outline:none;box-shadow:0 0 0 2px rgba(201,162,39,.55)}
 
