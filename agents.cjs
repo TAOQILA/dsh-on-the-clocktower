@@ -454,7 +454,19 @@ function buildPrompt(id, seat, replyTo, mode) {
   lines.push('');
   lines.push('【你这一轮要做什么】');
   if (replyTo !== undefined && replyTo !== null && replyTo !== '') {
-    lines.push('说书人（或另一位玩家）刚刚私聊了你（见上方对话最后几条私聊），这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
+    lines.push('说书人（或另一位玩家）刚刚私聊了你，这是在向你提问。请把回答直接写在 say 字段里，系统会私下转达给对方，不会公开。');
+    /* 把对方最后发来的私聊原文单独摘出来：只写「见上方对话」时模型经常答错对象——
+       实测玩家问「三个伪装是什么」，恶魔回了一句「今晚我要选 @棉花糖」（把夜间刀人指令当成了问题）。 */
+    var _rp = String(replyTo);
+    var _peer = (_rp === 'storyteller')
+      ? String((s.storyteller && s.storyteller.name) || '说书人')
+      : String(((s.seats[Number(_rp)] || {}).name) || (Number(_rp) + 1) + ' 号');
+    var _in = (v.messages || []).filter(function (m) { return m && m.channel === 'private' && String(m.from) === _rp; }).slice(-2);
+    if (_in.length) {
+      lines.push('【对方最后发给你的私聊原文】' + _peer + '：');
+      _in.forEach(function (m) { lines.push('  「' + String(m.text || '') + '」'); });
+      lines.push('你这一轮只回答上面这条私聊里问的事。对方问角色、问你的伪装身份、问你要穿哪个身份，就把你手上对应的信息告诉他（对邪恶同伴可以直说）；对方问夜间目标才回答夜间目标。不要答非所问，也不要反过来问他。');
+    }
     lines.push('say 必须非空：必须给出一句真实的回答（说书人的提问尤其必须回答，例如你要选择的目标），不能留空。whisper 留空数组即可。');
     lines.push('【正面回答，不许敷衍】对方问什么，你第一句就先回答什么：他问「你是不是信息位」就回答是或不是、你是什么位；他问「你怀疑谁」就点出具体座位。禁止用「收到」「我先听听」「等 X 摊完再说」「知道了」这类空话开头——那等于没回。');
     lines.push('不方便说也要给出理由（「现在不说，报了就等于把身份交出去」），而不是答非所问。回答一句就够，不要长篇。');
@@ -806,7 +818,61 @@ const DM_QUEUE = new Map();
 /* 串行补发排队中的私聊：以前一轮结束只补一位，后面的要再等一整轮（好几分钟），
    玩家在界面上看到的就是「他不理我」。这里一次把队列补完。 */
 const DM_DRAIN = new Set();
-function dmQueued(id) { return (DM_QUEUE.get(id) || []).length; }
+/* 同一句私聊可能被前端和宿主端各触发一次（见 server.cjs 的自动补发），这里按「座位>对端」去重 */
+const DM_INFLIGHT = new Set();
+/* 正在跑的私聊轮计数（私聊轮不进 RUNNING，免得公聊轮的进度被它打乱） */
+const DM_RUN = new Map();
+/* 队列落盘：只放内存的话，插件热重载 / DSH 重启会把整条队列吞掉——玩家那边显示「已读」，
+   却永远等不到回话（m14808：04:38:51 发来的私聊，04:39:31 重启后再也没人回）。
+   所以入队 / 出队都写一份到 state/dmQueue.json，重启后第一次碰到这局时读回来接着补。 */
+function dmQueueFile(id) { return path.join(E.gameDir(id), 'state', 'dmQueue.json'); }
+function loadDmQueue(id) {
+  if (DM_QUEUE.has(id)) return DM_QUEUE.get(id);
+  let arr = [];
+  try { arr = JSON.parse(fs.readFileSync(dmQueueFile(id), 'utf8')); } catch (e) { arr = []; }
+  if (!Array.isArray(arr)) arr = [];
+  arr = arr.filter(function (j) { return j && Array.isArray(j.seats) && j.seats.length; });
+  if (arr.length) DM_QUEUE.set(id, arr);
+  return arr;
+}
+function saveDmQueue(id) {
+  const q = DM_QUEUE.get(id) || [];
+  try {
+    const dir = path.join(E.gameDir(id), 'state');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
+    fs.writeFileSync(dmQueueFile(id), JSON.stringify(q, null, 2), 'utf8');
+  } catch (e) { /* 落盘失败不能影响内存队列 */ }
+}
+function dmQueued(id) { return loadDmQueue(id).length; }
+/* 这句私聊是不是已经回过了：重启前刚回完、还没来得及从队列里删掉，不要重复回一遍 */
+function dmAnswered(id, job) {
+  if (!job || job.replyTo === undefined || job.replyTo === null || job.replyTo === '' || job.replyTo === 'storyteller') return false;
+  try {
+    const s = E.loadState(id);
+    const seat = String((job.seats || [])[0]);
+    const to = String(job.replyTo);
+    const since = String(job.t || '');
+    if (!isFinite(Number(seat)) || !isFinite(Number(to))) return false;
+    return (s.messages || []).some(function (m) {
+      return m && m.channel === 'private' && String(m.from) === seat
+        && (m.to || []).map(String).indexOf(to) >= 0 && (!since || String(m.t) >= since);
+    });
+  } catch (e) { return false; }
+}
+/* 玩家给 Agent 发私聊后，保证有人回：服务端每次落库玩家私聊都调这个。
+   正在跑一轮就排队（队列落盘），重启后接着补。 */
+function replyToDm(id, message) {
+  if (!message || message.channel !== 'private') return { ok: false, error: '不是私聊' };
+  if (message.from === 'storyteller' || message.from === 'admin') return { ok: false, error: '不是玩家发起的私聊' };
+  const st = E.loadState(id);
+  const from = Number(message.from);
+  const tos = (Array.isArray(message.to) ? message.to : [message.to]);
+  const ag = tos.filter(function (x) { return x !== 'storyteller' && x !== undefined && x !== null && x !== ''; })
+    .map(Number).filter(function (i) { return isFinite(i) && st.seats[i] && st.seats[i].type === 'agent'; });
+  if (!isFinite(from) || !ag.length) return { ok: false, error: '没有需要回应的 Agent' };
+  return runRound(id, { seats: ag, replyTo: from });
+}
+
 async function drainDm(id) {
   if (DM_DRAIN.has(id)) return;
   DM_DRAIN.add(id);
@@ -818,6 +884,8 @@ async function drainDm(id) {
       if (!q.length) break;
       const job = q.shift();
       if (q.length) DM_QUEUE.set(id, q); else DM_QUEUE.delete(id);
+      saveDmQueue(id);
+      if (dmAnswered(id, job)) { await sleep(50); continue; }
       let started = null;
       try { started = runRound(id, job); } catch (e) { started = null; }
       if (!started || !started.ok) break;
@@ -830,15 +898,17 @@ async function drainDm(id) {
 const STORY_RUNNING = new Map();
 
 function status(id) {
+  loadDmQueue(id);   /* 前端 2.5s 轮询会走到这里：重启后靠它把落盘的队列续上 */
   const r = RUNNING.get(id);
   const queued = dmQueued(id);
   if (!r) {
     /* 队列里还有没回的私聊、而当前没有轮次在跑：借这次轮询立刻补上
        （解决「上一轮结束后补发那一步因故没执行 → 队列永远卡住」） */
     if (queued) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 0);
-    return { running: false, done: 0, total: 0, current: null, results: [], queued: queued };
+    if (queued) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 0);
+    return { running: false, done: 0, total: 0, current: null, results: [], queued: queued, dm: DM_RUN.get(id) || 0 };
   }
-  const out = { running: r.running, done: r.done, total: r.total, current: r.current, waiting: r.waiting || [], results: r.results, error: r.error || null, queued: queued };
+  const out = { running: r.running, done: r.done, total: r.total, current: r.current, waiting: r.waiting || [], results: r.results, error: r.error || null, queued: queued, dm: DM_RUN.get(id) || 0 };
   if (!r.running && queued) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 0);
   return out;
 }
@@ -1030,18 +1100,16 @@ async function thinkAndSpeak(id, seat, opts) {
 
 async function runRound(id, opts) {
   opts = opts || {};
+  loadDmQueue(id);   /* 重启后第一次进来：把没回完的私聊队列从盘上接回来 */
+  const _isDm = Array.isArray(opts.seats) && opts.seats.length === 1
+    && opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '';
+  const _dmKey = _isDm ? (String(opts.seats[0]) + '>' + String(opts.replyTo)) : null;
+  if (_dmKey && DM_INFLIGHT.has(_dmKey)) return { ok: true, dedup: true, total: 0 };
   const cur = RUNNING.get(id);
-  if (cur && cur.running) {
-    /* 私聊回复不能因为「正在跑一轮」就被丢掉：排队，等这一轮结束后自动补回 */
-    if (Array.isArray(opts.seats) && opts.seats.length && opts.replyTo !== undefined && opts.replyTo !== null && opts.replyTo !== '') {
-      const q = DM_QUEUE.get(id) || [];
-      q.push({ seats: opts.seats.slice(), replyTo: opts.replyTo });
-      DM_QUEUE.set(id, q);
-      try { E.log(id, '系统', '有玩家私聊：这一轮还没说完，先排进回复队列（第 ' + q.length + ' 条）', true); } catch (e) {}
-      return { ok: true, queued: true, total: q.length };
-    }
-    return { ok: false, error: '这一局正在跑一轮，请等它结束' };
-  }
+  /* 私聊回复走独立通道：公聊轮再长，一句私聊也不该等上几分钟。
+     E.say / E.think / E.nomSetIntent 都是同步落库函数（Node 单线程，读-改-写之间没有 await），
+     所以私聊轮和公聊轮同时跑不会互相覆盖状态。 */
+  if (cur && cur.running && !_isDm) return { ok: false, error: '这一局正在跑一轮，请等它结束' };
   const s = E.loadState(id);
   const order = [];
   s.seats.forEach(function (x, i) {
@@ -1069,8 +1137,10 @@ async function runRound(id, opts) {
     pool = (opts.limit > 0) ? order.slice(0, opts.limit) : order;
   }
 
-  const run = { running: true, done: 0, total: pool.length, current: null, waiting: pool.slice(), results: [], error: null };
-  RUNNING.set(id, run);
+  const run = { running: true, done: 0, total: pool.length, current: null, waiting: pool.slice(), results: [], error: null, dm: !!_isDm };
+  if (_isDm) DM_RUN.set(id, (DM_RUN.get(id) || 0) + 1);
+  else RUNNING.set(id, run);
+  if (_dmKey) DM_INFLIGHT.add(_dmKey);
 
   run.promise = (async function () {
     try {
@@ -1106,8 +1176,9 @@ async function runRound(id, opts) {
           if (_dq && _dq.length) {
             const _job = _dq.shift();
             if (_dq.length) DM_QUEUE.set(id, _dq); else DM_QUEUE.delete(id);
+            saveDmQueue(id);
             const _ds = Number((_job.seats || [])[0]);
-            if (isFinite(_ds) && order.indexOf(_ds) >= 0) {
+            if (isFinite(_ds) && order.indexOf(_ds) >= 0 && !dmAnswered(id, _job)) {
               E.log(id, '系统', '有玩家私聊：暂停公开讨论，立刻先回私聊', true);
               run.current = _ds;
               let _dout = null;
@@ -1126,9 +1197,16 @@ async function runRound(id, opts) {
       run.running = false;
       run.current = null;
       run.waiting = [];
-      ROUND_LAST_AT.set(id, Date.now());
-      /* 补发排队中的私聊回复：一次全部补完 */
-      if (dmQueued(id)) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 300);
+      if (_dmKey) DM_INFLIGHT.delete(_dmKey);
+      if (_isDm) {
+        const n = (DM_RUN.get(id) || 1) - 1;
+        if (n > 0) DM_RUN.set(id, n); else DM_RUN.delete(id);
+      }
+      if (!_isDm) {
+        ROUND_LAST_AT.set(id, Date.now());
+        /* 补发排队中的私聊回复：一次全部补完 */
+        if (dmQueued(id)) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 300);
+      }
     }
   })();
 
@@ -2249,7 +2327,7 @@ module.exports = {
   askNomibationAgreement,
   runNomination, nomStatus, buildNomPrompt,
   viewFor, viewForStoryteller, buildPrompt, buildStorytellerNightPrompt, buildStorytellerDayPrompt,
-  parseReply, extractObject, runRound, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
+  parseReply, extractObject, runRound, replyToDm, runStoryteller, status, storyStatus, callModel, roleInfo, allRoles,
   setLlmCall, hasLlm, routeFor,
   wikiLookup, clearKnowledge, playerSystem, storytellerSystem, gameKnowledge, CORE_RULES, BALANCE_RULES,
   storyReply, buildStoryChatPrompt, specialRolesBrief, SPECIAL_ROLE_RULES, AI_STYLES, stylePrompt, styleKey,

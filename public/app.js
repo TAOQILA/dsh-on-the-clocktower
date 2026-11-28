@@ -11,7 +11,7 @@
  * by law. See the LICENSE file for details.
  */
 /* 血染钟鱼 - 魔典前端：围坐圈、选座、Agent 管理、说书人面板（纯字符串拼接，无模板字面量） */
-var VERSION = '0.17.5';
+var VERSION = '0.17.6';
 var $ = function(s){ return document.querySelector(s); };
 var API = (function(){ var p = location.pathname; if (p.charAt(p.length-1) !== '/') p = p.replace(/[^/]*$/, ''); return p + 'api/'; })();
 async function api(name, data){
@@ -2227,7 +2227,7 @@ function dmPanel(g){
   var _ru = S.round || null;
   if (_ru && _ru.running && dmPeer !== '' && dmPeer !== 'storyteller'){
     if (String(_ru.current) === String(dmPeer)) typing = '对方正在输入…';
-    else if ((_ru.waiting || []).map(String).indexOf(String(dmPeer)) >= 0) typing = '正在排队发言…'; 
+    else if ((_ru.waiting || []).map(String).indexOf(String(dmPeer)) >= 0) typing = '对方正在回你…';   /* 私聊走独立通道，不再排队等公聊轮 */ 
   }
   return '<div class="dmcol"><div class="dmhead dmchathead">'
     + '<button class="dmback" onclick="backDmList()" title="返回私聊列表">‹</button>'

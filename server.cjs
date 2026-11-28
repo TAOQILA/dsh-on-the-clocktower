@@ -211,6 +211,11 @@ function buildApi(opts){
       const need = (m.channel === 'private') ? toSt : addressed;
       if (need && m.from !== 'storyteller') { try { A.storyReply(b.id, m); } catch (e) {} }
     }
+    /* 玩家之间私聊：不管前端有没有补那一句 /api/round，服务端都保证有人回。
+       以前完全依赖前端，只要它没发出去或被并发吃掉，玩家就永远等不到回话（m14882/m14910）。 */
+    if (r && r.ok && r.message && r.message.channel === 'private') {
+      try { A.replyToDm(b.id, r.message); } catch (e) {}
+    }
     return r;
   },
   messages: (b) => ({ messages: E.messages(b.id, b.viewer, !!b.storyteller) }),

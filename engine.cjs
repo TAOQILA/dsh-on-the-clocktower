@@ -421,7 +421,8 @@ function listGames(){
 function say(id, seat, text, channel, to){
   const s = loadState(id);
   const ch = channel==='private'?'private':'town';
-  const targets = ch==='private' ? (Array.isArray(to)?to:[to]).filter(x=>x!==undefined&&x!==null) : [];
+  const targets = ch==='private' ? (Array.isArray(to)?to:[to]).filter(x=>x!==undefined&&x!==null&&x!=='')
+    .map(function(x){ const n=Number(x); return (x==='storyteller'||x==='admin'||x!=='')&&x!==null&&!isFinite(n) ? x : n; }) : [];
   /* 夜晚禁止玩家之间私聊，但允许与说书人私聊（夜里询问/回答角色选择） */
   if (ch==='private' && s.phase==='night') {
     const toSt = seat==='storyteller' || targets.indexOf('storyteller')>=0;
@@ -503,8 +504,9 @@ function messages(id, viewer, isStoryteller){
        否则「私聊 5 号」的内容会被说书人当成发给自己的话 */
     const involvesSt = (m.from === 'storyteller') || (Array.isArray(m.to) && m.to.indexOf('storyteller') >= 0);
     if (isStoryteller) return involvesSt;
-    if (m.from===viewer) return true;
-    return Array.isArray(m.to) && m.to.indexOf(viewer)>=0;
+    /* 座位号可能是数字也可能是字符串（老数据：前端传 '2'），一律按字符串比 */
+    if (String(m.from)===String(viewer)) return true;
+    return Array.isArray(m.to) && m.to.map(String).indexOf(String(viewer))>=0;
   });
 }
 
