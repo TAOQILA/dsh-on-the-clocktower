@@ -803,12 +803,44 @@ const RUNNING = new Map();
 /* 私聊回复排队：这一局正在跑一轮时，收到的私聊回复请求先存这里，
    等当前这一轮结束再补上。否则「我正在想事情」就等于永远不回玩家。 */
 const DM_QUEUE = new Map();
+/* 串行补发排队中的私聊：以前一轮结束只补一位，后面的要再等一整轮（好几分钟），
+   玩家在界面上看到的就是「他不理我」。这里一次把队列补完。 */
+const DM_DRAIN = new Set();
+function dmQueued(id) { return (DM_QUEUE.get(id) || []).length; }
+async function drainDm(id) {
+  if (DM_DRAIN.has(id)) return;
+  DM_DRAIN.add(id);
+  try {
+    for (;;) {
+      const cur = RUNNING.get(id);
+      if (cur && cur.running) break;   /* 公聊轮还在跑：等它的 finally 或前端轮询再来一次 */
+      const q = DM_QUEUE.get(id) || [];
+      if (!q.length) break;
+      const job = q.shift();
+      if (q.length) DM_QUEUE.set(id, q); else DM_QUEUE.delete(id);
+      let started = null;
+      try { started = runRound(id, job); } catch (e) { started = null; }
+      if (!started || !started.ok) break;
+      const r2 = RUNNING.get(id);
+      if (r2 && r2.promise) { try { await r2.promise; } catch (e) {} }
+      await sleep(200);
+    }
+  } finally { DM_DRAIN.delete(id); }
+}
 const STORY_RUNNING = new Map();
 
 function status(id) {
   const r = RUNNING.get(id);
-  if (!r) return { running: false, done: 0, total: 0, current: null, results: [] };
-  return { running: r.running, done: r.done, total: r.total, current: r.current, waiting: r.waiting || [], results: r.results, error: r.error || null };
+  const queued = dmQueued(id);
+  if (!r) {
+    /* 队列里还有没回的私聊、而当前没有轮次在跑：借这次轮询立刻补上
+       （解决「上一轮结束后补发那一步因故没执行 → 队列永远卡住」） */
+    if (queued) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 0);
+    return { running: false, done: 0, total: 0, current: null, results: [], queued: queued };
+  }
+  const out = { running: r.running, done: r.done, total: r.total, current: r.current, waiting: r.waiting || [], results: r.results, error: r.error || null, queued: queued };
+  if (!r.running && queued) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 0);
+  return out;
 }
 function storyStatus(id) {
   const r = STORY_RUNNING.get(id);
@@ -832,23 +864,30 @@ async function applyOne(id, seat, out, opts, run){
   if (isDm) {
     /* 私聊回复模式：把话私下回给发件人（说书人侧也能看到），不占公开发言 */
     let back = dialectText(parsed);
-    if (!back && !out.error) {
-      /* 模型没答上来时补一次强指令，私聊必须有回音 */
+    /* 私聊必须有回音：模型没答上来（空回包 / 调用报错 / JSON 解析失败）就重试，
+       最多两次。以前只在「没报错但内容为空」时重试一次，调用报错就直接静默丢弃，
+       玩家那边看起来就是「已读不回」。 */
+    let dmTried = 0;
+    for (let attempt = 0; !back && attempt < 2; attempt++) {
+      dmTried++;
       try {
         const built2 = buildPrompt(id, seat, dmReplyTo, opts.mode);
         const route2 = routeFor(id, seat);
         const out2 = await callModel({
           game: id, seat: seat,
-          prompt: built2.prompt + '\n\n【再强调一次】对方在等你回话。say 字段必须填写一句真实的回复，不能空。',
+          prompt: built2.prompt + '\n\n【再强调一次】对方在等你回话。say 字段必须填写一句真实的回复，不能空；只输出 JSON。',
           system: playerSystem(id, seat), provider: route2.provider, model: route2.model
         });
         const p2 = parseReply(out2.text);
         back = dialectText(p2);
-        /* 把重试结果合进 parsed，保证结果面板与落库一致 */
         if (back) { parsed.say = back; parsed.think = parsed.think || p2.think; }
-      } catch (e) { /* 重试失败就作罢 */ }
+      } catch (e) { /* 这一次失败，继续下一次 */ }
     }
     if (back) E.say(id, seat, back, 'private', [dmReplyTo]);
+    else {
+      const why = out.error ? String(out.error) : '模型没有给出可用回包';
+      try { E.aiError(id, seat, '私聊回复失败（重试 ' + dmTried + ' 次）：' + why); } catch (e) {}
+    }
   } else if (parsed.say && String(parsed.say).trim()) {
     E.say(id, seat, String(parsed.say).trim(), 'town');
   }
@@ -998,6 +1037,7 @@ async function runRound(id, opts) {
       const q = DM_QUEUE.get(id) || [];
       q.push({ seats: opts.seats.slice(), replyTo: opts.replyTo });
       DM_QUEUE.set(id, q);
+      try { E.log(id, '系统', '有玩家私聊：这一轮还没说完，先排进回复队列（第 ' + q.length + ' 条）', true); } catch (e) {}
       return { ok: true, queued: true, total: q.length };
     }
     return { ok: false, error: '这一局正在跑一轮，请等它结束' };
@@ -1032,7 +1072,7 @@ async function runRound(id, opts) {
   const run = { running: true, done: 0, total: pool.length, current: null, waiting: pool.slice(), results: [], error: null };
   RUNNING.set(id, run);
 
-  (async function () {
+  run.promise = (async function () {
     try {
       /* 严格按座位顺序，一位说完再轮到下一位：每个人的提示词都在上一位落库之后才构建，
          所以后发言的人能看到先发言的人说了什么，信息才能真正互相影响。
@@ -1060,7 +1100,8 @@ async function runRound(id, opts) {
         run.waiting = run.waiting.filter(function (n) { return n !== seat; });
         /* 有人私聊进来：公聊先暂停，插队把私聊回掉，再接着说——
            玩家不该等一整轮（好几分钟）才被搭理。 */
-        if (idx < pool.length - 1) {
+        /* 每一位说完都检查一次私聊队列（包括最后一位）：玩家不该为了等一句回话而整轮排队 */
+        if (dmQueued(id)) {
           const _dq = DM_QUEUE.get(id);
           if (_dq && _dq.length) {
             const _job = _dq.shift();
@@ -1086,13 +1127,8 @@ async function runRound(id, opts) {
       run.current = null;
       run.waiting = [];
       ROUND_LAST_AT.set(id, Date.now());
-      /* 补发排队中的私聊回复：一轮只补一位，避免又堆成一串 */
-      const _q = DM_QUEUE.get(id);
-      if (_q && _q.length) {
-        const _nxt = _q.shift();
-        if (_q.length) DM_QUEUE.set(id, _q); else DM_QUEUE.delete(id);
-        setTimeout(function () { try { runRound(id, _nxt); } catch (e) {} }, 300);
-      }
+      /* 补发排队中的私聊回复：一次全部补完 */
+      if (dmQueued(id)) setTimeout(function () { try { drainDm(id); } catch (e) {} }, 300);
     }
   })();
 
@@ -1725,7 +1761,13 @@ async function askSeat(id, seat, kind, extra){
   return { parsed:p, obj:obj || {} };
 }
 
-function seatType(s, i){ return (s.seats[i] && s.seats[i].type === 'player') ? 'player' : 'agent'; }
+function seatType(s, i){
+  /* 真人座位的 type 由 engine 统一落成 'human'（createGame 里做过归一），前端建局时传的是 'player'。
+     以前这里只认 'player'，结果真人被当成 Agent：提名阶段替他生成「提名理由/反驳/投票」，
+     玩家会看到「我发了根本不是我发的话」。两种写法都认。 */
+  const t = s.seats[i] && s.seats[i].type;
+  return (t === 'player' || t === 'human') ? 'player' : 'agent';
+}
 
 /* 等真人把某个动作做完（看完 stage 变了或超时） */
 async function waitStage(id, want, capMs){
